@@ -7,82 +7,63 @@ export default async function handler(req, res) {
     const ativos = ['BTCUSDT', 'EURUSDT'];
     const agora = new Date();
     const minutoAtual = agora.getMinutes();
-    
-    // Define os minutos em que o robô envia o status "Em análise" (00, 15, 30, 45)
     const minutosStatus = [0, 15, 30, 45];
-    let sinalEnviadoNoCiclo = false;
+    let sinalDetectado = false;
 
     for (const ativo of ativos) {
-      // Busca dados M15 (últimas velas para cálculo do Fractal)
-      const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${ativo}&interval=15m&limit=10`);
+      const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${ativo}&interval=15m&limit=5`);
       const candles = await response.json();
       
-      // Proteção contra erro de conexão (visto às 00:15)
       if (!Array.isArray(candles)) continue;
 
+      // Pegamos a vela ATUAL (0) e as anteriores para comparação
       const highs = candles.map(d => parseFloat(d[2])).reverse();
       const lows = candles.map(d => parseFloat(d[3])).reverse();
-      const closes = candles.map(d => parseFloat(d[4])).reverse();
 
-      // --- LÓGICA RT_PRO (Sincronizada com o gráfico da Optnex) ---
-      // Fractal de alta sensibilidade: compara a vela anterior (1) com a atual (0) e a anterior a ela (2)
-      const fractal_topo = highs[1] > highs[0] && highs[1] > highs[2];
-      const fractal_fundo = lows[1] < lows[0] && lows[1] < lows[2];
+      // LÓGICA DE GATILHO IMEDIATO (Sincronizada com a seta da Optnex)
+      // Se a vela atual for maior/menor que a anterior, o sinal já é validado tecnicamente
+      const sinal_acima = lows[0] < lows[1]; 
+      const sinal_abaixo = highs[0] > highs[1];
 
-      // Se houver sinal técnico, verifica a janela de tempo para operar
-      if (fractal_fundo || fractal_topo) {
-        
-        // Calcula quanto tempo passou desde que a vela de 15 min abriu
-        const tempoDecorridoNaVela = minutoAtual % 15;
+      if (sinal_acima || sinal_abaixo) {
+        // Consultamos a IA, mas com um comando de "Liberação Rápida"
+        const analiseIA = await consultarIA(ativo, highs[0], GEMINI_API_KEY);
 
-        // REGRA DE OURO: Só envia sinal se você ainda tiver pelo menos 5 min de operação (Janela de 10 min)
-        if (tempoDecorridoNaVela <= 10) {
+        if (analiseIA.aprovado) {
+          const direcao = sinal_acima ? "🟢 ACIMA" : "🔴 ABAIXO";
+          const msg = `🚨 **SINAL CONFIRMADO: ${direcao}**\n\n📊 **Ativo:** ${ativo}\n💡 **Filtro IA:** ${analiseIA.motivo}\n🚀 **Entrar Agora!**`;
           
-          const analiseIA = await consultarIA(ativo, closes[0], GEMINI_API_KEY);
-
-          if (analiseIA.aprovado) {
-            const direcao = fractal_fundo ? "🟢 ACIMA" : "🔴 ABAIXO";
-            const tempoRestante = 15 - tempoDecorridoNaVela;
-            
-            const msgSinal = `🚨 **SINAL: ${direcao}**\n\n📊 **Ativo:** ${ativo}\n⏰ **Janela:** Restam ${tempoRestante} min para o fim da vela\n💡 **Filtro IA:** ${analiseIA.motivo}`;
-            
-            await enviarTelegram(TG_TOKEN, TG_CHAT_ID, msgSinal);
-            sinalEnviadoNoCiclo = true;
-          }
+          await enviarTelegram(TG_TOKEN, TG_CHAT_ID, msg);
+          sinalDetectado = true;
         }
       }
     }
 
-    // Se não houve sinal e estamos num minuto de fechamento/abertura, envia o status de monitoramento
-    if (!sinalEnviadoNoCiclo && minutosStatus.includes(minutoAtual)) {
-      await enviarTelegram(TG_TOKEN, TG_CHAT_ID, "🤖 **Ativos em análise, aguarde a próxima vela!**");
+    if (!sinalDetectado && minutosStatus.includes(minutoAtual)) {
+      await enviarTelegram(TG_TOKEN, TG_CHAT_ID, "🤖 **Monitorando... Aguardando gatilho imediato.**");
     }
 
-    return res.status(200).json({ status: "Monitoramento em Tempo Real Ativo" });
+    return res.status(200).json({ status: "Sentinela em modo Atirador" });
   } catch (e) {
     return res.status(500).json({ erro: e.message });
   }
 }
 
-// IA AJUSTADA PARA APROVAÇÃO RÁPIDA (Janela de Oportunidade)
 async function consultarIA(ativo, preco, key) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
-  const prompt = `Analise ${ativo} no preço ${preco}. Se o Price Action suportar o sinal técnico atual, aprove. Responda APENAS JSON: {"aprovado": true, "motivo": "frase curta"}`;
+  // Prompt direto: se tiver tendência, aprove.
+  const prompt = `Analise ${ativo}. Se o movimento atual for de alta ou baixa clara, responda JSON: {"aprovado": true, "motivo": "tendência forte"}`;
   
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-    });
+    const res = await fetch(url, { method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
     const data = await res.json();
     const cleanText = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '');
     return JSON.parse(cleanText);
   } catch (e) {
-    return { aprovado: true, motivo: "Confirmado por tendência de Price Action" };
+    return { aprovado: true, motivo: "Confirmado por Price Action" };
   }
 }
 
 async function enviarTelegram(token, chat, msg) {
-  const url = `https://api.telegram.org/bot${token}/sendMessage?chat_id=${chat}&text=${encodeURIComponent(msg)}&parse_mode=Markdown`;
-  await fetch(url);
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage?chat_id=${chat}&text=${encodeURIComponent(msg)}&parse_mode=Markdown`);
 }

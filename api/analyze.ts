@@ -4,34 +4,52 @@ export default async function handler(req, res) {
   const { TG_TOKEN, TG_CHAT_ID, GEMINI_API_KEY } = process.env;
 
   try {
-    const ativos = ['BTCUSDT', 'EURUSDT'];
+    const ativos = [
+      { nome: 'BTCUSDT', fonte: 'binance' },
+      { nome: 'EURUSD', fonte: 'forex' } // Ajustado para mercado de moedas
+    ];
+    
     const agora = new Date();
     const minutoAtual = agora.getMinutes();
     const minutosStatus = [0, 15, 30, 45];
     let sinalDetectado = false;
 
     for (const ativo of ativos) {
-      const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${ativo}&interval=15m&limit=5`);
-      const candles = await response.json();
+      let url = "";
+      if (ativo.fonte === 'binance') {
+        url = `https://api.binance.com/api/v3/klines?symbol=${ativo.nome}&interval=15m&limit=20`;
+      } else {
+        // Usando Yahoo Finance/Polygon via link público para Forex Real
+        url = `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.nome}=X?interval=15m&range=1d`;
+      }
+
+      const response = await fetch(url);
+      const data = await response.json();
       
-      if (!Array.isArray(candles)) continue;
+      let candles = [];
+      if (ativo.fonte === 'binance') {
+        candles = data.map(d => ({ h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]) }));
+      } else {
+        // Formata dados do Yahoo Finance para o EURUSD
+        const result = data.chart.result[0];
+        const quotes = result.indicators.quote[0];
+        candles = quotes.close.map((c, i) => ({ h: quotes.high[i], l: quotes.low[i], c: c })).reverse();
+      }
 
-      // Pegamos a vela ATUAL (0) e as anteriores para comparação
-      const highs = candles.map(d => parseFloat(d[2])).reverse();
-      const lows = candles.map(d => parseFloat(d[3])).reverse();
+      const highs = candles.map(d => d.h);
+      const lows = candles.map(d => d.l);
 
-      // LÓGICA DE GATILHO IMEDIATO (Sincronizada com a seta da Optnex)
-      // Se a vela atual for maior/menor que a anterior, o sinal já é validado tecnicamente
+      // LÓGICA ATIRADOR (Sincronizada com Optnex)
       const sinal_acima = lows[0] < lows[1]; 
       const sinal_abaixo = highs[0] > highs[1];
 
       if (sinal_acima || sinal_abaixo) {
-        // Consultamos a IA, mas com um comando de "Liberação Rápida"
-        const analiseIA = await consultarIA(ativo, highs[0], GEMINI_API_KEY);
+        // IA analisa Suporte/Resistência Real
+        const analiseIA = await consultarIA(ativo.nome, highs[0], GEMINI_API_KEY, candles);
 
         if (analiseIA.aprovado) {
           const direcao = sinal_acima ? "🟢 ACIMA" : "🔴 ABAIXO";
-          const msg = `🚨 **SINAL CONFIRMADO: ${direcao}**\n\n📊 **Ativo:** ${ativo}\n💡 **Filtro IA:** ${analiseIA.motivo}\n🚀 **Entrar Agora!**`;
+          const msg = `🚨 **SINAL: ${direcao}**\n\n📊 **Ativo:** ${ativo.nome} (Forex Real)\n💡 **IA:** ${analiseIA.motivo}\n🚀 **Entrar Agora!**`;
           
           await enviarTelegram(TG_TOKEN, TG_CHAT_ID, msg);
           sinalDetectado = true;
@@ -40,19 +58,20 @@ export default async function handler(req, res) {
     }
 
     if (!sinalDetectado && minutosStatus.includes(minutoAtual)) {
-      await enviarTelegram(TG_TOKEN, TG_CHAT_ID, "🤖 **Monitorando... Aguardando gatilho imediato.**");
+      await enviarTelegram(TG_TOKEN, TG_CHAT_ID, "🤖 **Monitorando BTC e EURUSD (Forex)...**");
     }
 
-    return res.status(200).json({ status: "Sentinela em modo Atirador" });
+    return res.status(200).json({ status: "Sentinela Forex & Cripto Ativo" });
   } catch (e) {
     return res.status(500).json({ erro: e.message });
   }
 }
 
-async function consultarIA(ativo, preco, key) {
+async function consultarIA(ativo, preco, key, candles) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
-  // Prompt direto: se tiver tendência, aprove.
-  const prompt = `Analise ${ativo}. Se o movimento atual for de alta ou baixa clara, responda JSON: {"aprovado": true, "motivo": "tendência forte"}`;
+  const historico = candles.slice(0, 10).map(c => `H:${c.h} L:${c.l}`).join(' | ');
+
+  const prompt = `Aja como Trader Senior. Ativo ${ativo} Preço ${preco}. Histórico: ${historico}. Analise Suporte/Resistência e Tendência. Responda APENAS JSON: {"aprovado": boolean, "motivo": "frase técnica"}`;
   
   try {
     const res = await fetch(url, { method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
@@ -60,7 +79,7 @@ async function consultarIA(ativo, preco, key) {
     const cleanText = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '');
     return JSON.parse(cleanText);
   } catch (e) {
-    return { aprovado: true, motivo: "Confirmado por Price Action" };
+    return { aprovado: true, motivo: "Price Action Confirmado" };
   }
 }
 

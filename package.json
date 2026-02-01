@@ -1,9 +1,10 @@
 {
   "name": "ricardo-sentinela",
   "version": "1.0.0",
+  "type": "module",
   "main": "api/analyze.ts",
   "dependencies": {
     "@vercel/node": "^3.0.0",
-    "node-fetch": "^2.6.7"
+    "node-fetch": "^3.3.2"
   }
 }

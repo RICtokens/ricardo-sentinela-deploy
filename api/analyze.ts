@@ -1,15 +1,14 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
+const fetch = require('node-fetch'); // Esta linha é o segredo para o erro 500 sumir
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { API_KEY, TG_TOKEN, TG_CHAT_ID } = process.env;
 
   try {
-    // 1. Simulação de Teste para confirmar que o robô está vivo
-    const message = "🚀 **Sentinela M15 Ativo!**\nConexão com a nuvem estabelecida com sucesso. Monitorando BTC/USD e EUR/USD.";
+    const message = "🚀 **Sentinela M15 Online!**\nO robô foi configurado com sucesso e já consegue falar com o Telegram.";
     
-    // 2. Envio para o Telegram
     const tgUrl = `https://api.telegram.org/bot${TG_TOKEN}/sendMessage`;
-    await fetch(tgUrl, {
+    const response = await fetch(tgUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -19,8 +18,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     });
 
-    return res.status(200).json({ status: 'Sucesso', message: 'Notificação enviada!' });
+    return res.status(200).json({ status: 'Sucesso', enviado: true });
   } catch (error) {
-    return res.status(500).json({ status: 'Erro', error: String(error) });
+    return res.status(500).json({ status: 'Erro', detalhe: String(error) });
   }
 }

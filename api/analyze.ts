@@ -6,24 +6,18 @@ export default async function handler(req, res) {
   try {
     const agoraUTC = new Date();
     const agoraBR = new Date(agoraUTC.getTime() - (3 * 60 * 60 * 1000));
-    
     const diaSemana = agoraBR.getDay();
     const minutoAtual = agoraBR.getMinutes();
     const horaAtual = agoraBR.getHours();
 
-    // TRAVA DE SEGURANÇA: Só manda sinal se estiver nos primeiros 9 minutos da vela M15
+    // TRAVA DE SEGURANÇA: Limite de 9 minutos para entrada na vela M15
     const minutoNoCiclo = minutoAtual % 15;
-    if (minutoNoCiclo > 9) {
-      return res.status(200).json({ status: "Fora da janela de entrada (limite 9 min)" });
-    }
+    if (minutoNoCiclo > 9) return res.status(200).json({ status: "Aguardando nova vela M15..." });
 
     const inicioM15 = Math.floor(minutoAtual / 15) * 15;
-    const fimM15 = inicioM15 + 15;
-    let horaFim = horaAtual;
-    let minFim = fimM15;
-    if (minFim === 60) { minFim = 0; horaFim = (horaAtual + 1) % 24; }
-    
-    const cicloVela = `${String(horaAtual).padStart(2, '0')}:${String(inicioM15).padStart(2, '0')} -> ${String(horaFim).padStart(2, '0')}:${String(minFim).padStart(2, '0')}`;
+    const fimM15 = (inicioM15 + 15) % 60;
+    const horaFim = fimM15 === 0 ? (horaAtual + 1) % 24 : horaAtual;
+    const cicloVela = `${String(horaAtual).padStart(2, '0')}:${String(inicioM15).padStart(2, '0')} -> ${String(horaFim).padStart(2, '0')}:${String(fimM15).padStart(2, '0')}`;
 
     const ativos = [
       { nome: 'BTCUSDT', operarFimDeSemana: true },
@@ -33,51 +27,66 @@ export default async function handler(req, res) {
     for (const ativo of ativos) {
       if (!ativo.operarFimDeSemana && (diaSemana === 0 || diaSemana === 6)) continue;
 
-      const url = `https://api.binance.com/api/v3/klines?symbol=${ativo.nome}&interval=15m&limit=20`;
+      // Busca 50 candles para cálculo de Médias Móveis (EMA) e MACD
+      const url = `https://api.binance.com/api/v3/klines?symbol=${ativo.nome}&interval=15m&limit=50`;
       const response = await fetch(url);
       const data = await response.json();
       if (!Array.isArray(data)) continue;
 
       const candles = data.map(d => ({
-        o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4])
+        o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
       })).reverse();
 
+      // Lógica do Script Optnex (Seta)
       const sinalScriptAcima = candles[0].l < candles[1].l;
       const sinalScriptAbaixo = candles[0].h > candles[1].h;
-      const analiseIA = await consultarIA(ativo.nome, candles, GEMINI_API_KEY);
 
-      if (sinalScriptAcima || sinalScriptAbaixo || analiseIA.oportunidadeUnica) {
-        let direcao = (sinalScriptAcima || analiseIA.direcao === "CALL") ? "🟢 ACIMA" : "🔴 ABAIXO";
-        let notaExtra = (!sinalScriptAcima && !sinalScriptAbaixo) ? "\n⚠️ *Nota: Entrada técnica da IA (fora do script).*" : "";
+      // IA como Humano: Analisa EMA, MACD, RSI, Bollinger, Candlesticks e Notícias
+      const analiseIA = await consultarIAAgenteElite(ativo.nome, candles, GEMINI_API_KEY, sinalScriptAcima, sinalScriptAbaixo);
+
+      if (analiseIA.decisao === "ENTRAR") {
+        const direcao = analiseIA.direcao === "CALL" ? "🟢 ACIMA" : "🔴 ABAIXO";
+        const notaExtra = analiseIA.tipoOrigem === "IA_INDEPENDENTE" ? "\n⚠️ *Nota: Entrada baseada em análise técnica da IA (fora do script).*" : "";
 
         const msg = `🚨 **SINAL CONFIRMADO: ${direcao}**\n\n` +
                     `🪙 **ATIVO:** ${ativo.nome}\n` +
                     `⏰ **VELA (M15):** ${cicloVela}\n` + 
-                    `📊 **MOTIVO:** ${analiseIA.motivo}\n` +
+                    `📊 **ANÁLISE DO AGENTE:** ${analiseIA.motivo}\n` +
                     `${notaExtra}\n\n` +
-                    `🚀 **ENTRAR AGORA NA OPTNEX!**`;
+                    `🚀 **EXECUTAR NA OPTNEX AGORA!**`;
 
         await enviarTelegram(TG_TOKEN, TG_CHAT_ID, msg);
       }
     }
 
-    return res.status(200).json({ status: "Monitorando dentro da janela" });
+    return res.status(200).json({ status: "Agente Trader 24/7 Ativo" });
   } catch (e) {
     return res.status(200).json({ erro: e.message });
   }
 }
 
-async function consultarIA(ativo, candles, key) {
+async function consultarIAAgenteElite(ativo, candles, key, scriptAcima, scriptAbaixo) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
-  const dadosTexto = candles.slice(0, 10).map(c => `O:${c.o} H:${c.h} L:${c.l} C:${c.c}`).join(' | ');
-  const prompt = `Trader Elite. Ativo ${ativo}. Candles M15: ${dadosTexto}. Se houver oportunidade clara, defina oportunidadeUnica como true. Responda JSON: {"oportunidadeUnica": boolean, "direcao": "CALL" ou "PUT", "motivo": "frase curta"}`;
+  const dados = candles.slice(0, 20).map(c => `C:${c.c} V:${c.v} H:${c.h} L:${c.l}`).join('|');
+
+  const prompt = `Aja como um Trader Humano Senior de Elite 24/7. 
+  Analise ${ativo} em M15 com estes dados: ${dados}.
+  REQUISITOS DE ANÁLISE:
+  1. Verifique Candlesticks (Engolfo, Martelo, Doji).
+  2. Verifique Indicadores: EMA (Cruzamentos), MACD, RSI, Bandas de Bollinger e Volume.
+  3. Considere Suportes/Resistências e Notícias globais recentes.
+  4. Script Optnex indica: ${scriptAcima ? 'COMPRA' : scriptAbaixo ? 'VENDA' : 'NEUTRO'}.
+  
+  Decida se deve entrar agora. Responda APENAS em JSON:
+  {"decisao": "ENTRAR" ou "AGUARDAR", "direcao": "CALL" ou "PUT", "motivo": "resumo técnico de todos os indicadores", "tipoOrigem": "SCRIPT" ou "IA_INDEPENDENTE"}`;
+
   try {
     const res = await fetch(url, { method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
     const data = await res.json();
     const cleanText = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '');
     return JSON.parse(cleanText);
   } catch (e) {
-    return { oportunidadeUnica: false, motivo: "Price Action OK" };
+    return { decisao: "AGUARDAR", motivo: "Erro técnico" };
   }
 }
 

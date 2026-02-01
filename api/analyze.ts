@@ -10,12 +10,16 @@ export default async function handler(req, res) {
     const minutosStatus = [0, 15, 30, 45];
     let sinalDetectado = false;
 
+    // Cálculo da Expiração (Próximo múltiplo de 15 minutos)
+    const proximoFechamento = new Date(agora);
+    proximoFechamento.setMinutes(Math.ceil((minutoAtual + 1) / 15) * 15, 0, 0);
+    const horaExpiracao = proximoFechamento.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
     for (const ativo of ativos) {
       const url = `https://api.binance.com/api/v3/klines?symbol=${ativo}&interval=15m&limit=10`;
       const response = await fetch(url);
       const data = await response.json();
       
-      // BLINDAGEM: Se a API falhar, pula para o próximo sem derrubar o robô
       if (!Array.isArray(data)) continue;
 
       const candles = data.map(d => ({
@@ -27,7 +31,7 @@ export default async function handler(req, res) {
       const highs = candles.map(d => d.h);
       const lows = candles.map(d => d.l);
 
-      // Lógica de Gatilho (Sincronizada com a Optnex)
+      // Lógica Atirador: Gatilho na vela atual
       const sinal_acima = lows[0] < lows[1]; 
       const sinal_abaixo = highs[0] > highs[1];
 
@@ -36,14 +40,20 @@ export default async function handler(req, res) {
 
         if (analiseIA.aprovado) {
           const direcao = sinal_acima ? "🟢 ACIMA" : "🔴 ABAIXO";
-          const msg = `🚨 **SINAL CONFIRMADO: ${direcao}**\n\n📊 **Ativo:** ${ativo}\n💡 **Filtro IA:** ${analiseIA.motivo}\n🚀 **Entrar Agora!**`;
+          
+          // MENSAGEM ULTRA DETALHADA
+          const msg = `🚨 **SINAL CONFIRMADO: ${direcao}**\n\n` +
+                      `🪙 **ATIVO:** ${ativo}\n` +
+                      `⏰ **EXPIRAÇÃO:** ${horaExpiracao}\n` + 
+                      `💡 **IA:** ${analiseIA.motivo}\n\n` +
+                      `🚀 **ENTRAR AGORA NA OPTNEX!**`;
+
           await enviarTelegram(TG_TOKEN, TG_CHAT_ID, msg);
           sinalDetectado = true;
         }
       }
     }
 
-    // Status a cada 15 min para você saber que está tudo OK
     if (!sinalDetectado && minutosStatus.includes(minutoAtual)) {
       await enviarTelegram(TG_TOKEN, TG_CHAT_ID, "🤖 **Sentinela Online: Monitorando BTC e EURUSD.**");
     }
@@ -57,7 +67,7 @@ export default async function handler(req, res) {
 async function consultarIA(ativo, preco, key, candles) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
   const historico = candles.slice(0, 5).map(c => `H:${c.h} L:${c.l}`).join(' | ');
-  const prompt = `Trader Senior: Analise ${ativo} em ${preco}. Se houver tendência, aprove. JSON: {"aprovado": true, "motivo": "tendência clara"}`;
+  const prompt = `Trader Senior: Analise ${ativo} em ${preco}. Se houver tendência clara, aprove. Responda APENAS JSON: {"aprovado": true, "motivo": "frase curta"}`;
   
   try {
     const res = await fetch(url, { method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });

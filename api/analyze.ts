@@ -2,11 +2,11 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 
 // --- CONTROLE DE DOCUMENTAÇÃO (ISO 9001) ---
 const DOC_CONTROL = {
-    versao: "v2.0.3",
-    revisao: "03",
+    versao: "v2.0.4",
+    revisao: "04",
     data_revisao: "03/02/2026",
-    hora_revisao: "21:40",
-    status: "HOMOLOGADO"
+    hora_revisao: "21:45",
+    status: "ATIVO"
 };
 
 let lastSinais: Record<string, string> = {};
@@ -19,7 +19,7 @@ const ATIVOS = [
   { symbol: "GBPUSD=X", label: "GBPUSD", source: "yahoo" }
 ];
 
-export default async function handler(req: VercelRequest, res: res: VercelResponse) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { TG_TOKEN, TG_CHAT_ID } = process.env;
 
   try {

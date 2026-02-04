@@ -1,11 +1,10 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// --- CONTROLE DE DOCUMENTAÇÃO (ISO 9001) ---
 const DOC_CONTROL = {
-    versao: "v2.0.5",
-    revisao: "05",
+    versao: "v2.0.6",
+    revisao: "06",
     data_revisao: "03/02/2026",
-    hora_revisao: "21:50",
+    hora_revisao: "21:58",
     status: "ATIVO"
 };
 
@@ -38,13 +37,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         const i = candles.length - 1;
-        const getEMA = (d: any[], p: number) => {
-          const k = 2 / (p + 1);
-          let val = d[0].c;
-          for (let j = 1; j < d.length; j++) val = d[j].c * k + val * (1 - k);
-          return val;
-        };
         const calculateRSI = (d: any[], p: number) => {
+          if (d.length <= p) return 50;
           let g = 0, l = 0;
           for (let j = d.length - p; j < d.length; j++) {
             const diff = d[j].c - d[j-1].c;
@@ -53,15 +47,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return 100 - (100 / (1 + (g / l)));
         };
 
+        const getEMA = (d: any[], p: number) => {
+          const k = 2 / (p + 1);
+          let val = d[0].c;
+          for (let j = 1; j < d.length; j++) val = d[j].c * k + val * (1 - k);
+          return val;
+        };
+
         const rsiVal = calculateRSI(candles, 14);
+        const rsiAnterior = calculateRSI(candles.slice(0, -1), 14);
         const ema9 = getEMA(candles, 9);
         const ema21 = getEMA(candles, 21);
+        
         const fT = candles[i-2].h > candles[i-4].h && candles[i-2].h > candles[i-3].h && candles[i-2].h > candles[i-1].h && candles[i-2].h > candles[i].h;
         const fF = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
 
         let s = null;
-        if (fT && ema9 < ema21 && rsiVal <= 45 && candles[i].c < candles[i].o) s = "🔴 ABAIXO";
-        if (fF && ema9 > ema21 && rsiVal >= 55 && candles[i].c > candles[i].o) s = "🟢 ACIMA";
+        // FILTRO DE INCLINAÇÃO APLICADO AQUI:
+        if (fT && ema9 < ema21 && rsiVal <= 45 && rsiVal < rsiAnterior && candles[i].c < candles[i].o) s = "🔴 ABAIXO";
+        if (fF && ema9 > ema21 && rsiVal >= 55 && rsiVal > rsiAnterior && candles[i].c > candles[i].o) s = "🟢 ACIMA";
 
         if (s) {
           await delay(10000); 

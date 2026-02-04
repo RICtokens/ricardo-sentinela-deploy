@@ -2,10 +2,10 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 
 // --- CONTROLE DE DOCUMENTAÇÃO (ISO 9001) ---
 const DOC_CONTROL = {
-    versao: "v2.0.2",
-    revisao: "02",
+    versao: "v2.0.3",
+    revisao: "03",
     data_revisao: "03/02/2026",
-    hora_revisao: "21:30",
+    hora_revisao: "21:40",
     status: "HOMOLOGADO"
 };
 
@@ -19,7 +19,7 @@ const ATIVOS = [
   { symbol: "GBPUSD=X", label: "GBPUSD", source: "yahoo" }
 ];
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: VercelRequest, res: res: VercelResponse) {
   const { TG_TOKEN, TG_CHAT_ID } = process.env;
 
   try {
@@ -85,35 +85,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <html lang="pt-br">
       <head>
           <meta charset="UTF-8">
-          <title>SENTINELA ATIVO - ${DOC_CONTROL.versao}</title>
+          <title>SENTINELA - ${DOC_CONTROL.versao}</title>
           <style>
               body { background-color: #020202; color: #00ff00; font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
-              /* O Olho do Robô no Fundo */
               .eye-bg {
-                  position: absolute; width: 300px; height: 300px;
-                  background: radial-gradient(circle, rgba(0,255,0,0.2) 0%, rgba(0,0,0,0) 70%);
-                  border-radius: 50%; border: 2px solid rgba(0,255,0,0.1);
-                  box-shadow: inset 0 0 50px rgba(0,255,0,0.2);
+                  position: absolute; width: 350px; height: 350px;
+                  background: radial-gradient(circle, rgba(0,255,0,0.15) 0%, rgba(0,0,0,0) 70%);
+                  border-radius: 50%; border: 1px solid rgba(0,255,0,0.05);
                   display: flex; justify-content: center; align-items: center; z-index: -1;
               }
-              .pupil { width: 40px; height: 40px; background: #00ff00; border-radius: 50%; box-shadow: 0 0 20px #00ff00; animation: scan 4s infinite ease-in-out; }
-              @keyframes scan { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.2); opacity: 1; } }
+              .pupil { width: 30px; height: 30px; background: #00ff00; border-radius: 50%; box-shadow: 0 0 15px #00ff00; animation: scan 3s infinite ease-in-out; }
+              @keyframes scan { 0%, 100% { transform: scale(1); opacity: 0.6; } 50% { transform: scale(1.3); opacity: 0.9; } }
               
-              .panel { text-align: center; border: 1px solid rgba(0,255,0,0.3); padding: 40px; border-radius: 10px; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); }
-              .title { font-size: 2rem; font-weight: bold; margin: 10px 0; letter-spacing: 4px; text-shadow: 0 0 10px #00ff00; }
-              .info { margin: 20px 0; font-size: 0.85rem; border: 1px solid #222; padding: 10px; color: #fff; }
-              .footer { margin-top: 30px; font-size: 0.7rem; color: #333; border-top: 1px solid #111; padding-top: 15px; }
-              .blink { animation: b 1.5s infinite; }
+              .panel { text-align: center; border: 1px solid rgba(0,255,0,0.4); padding: 50px; border-radius: 8px; background: rgba(0,0,0,0.9); box-shadow: 0 0 40px rgba(0,0,0,1); }
+              .title { font-size: 1.8rem; font-weight: bold; margin-bottom: 30px; letter-spacing: 2px; color: #fff; text-shadow: 0 0 8px #00ff00; }
+              .status-box { font-size: 1.1rem; color: #00ff00; font-weight: bold; margin: 20px 0; }
+              .footer { margin-top: 40px; font-size: 0.85rem; color: #888; border-top: 1px solid #333; padding-top: 20px; line-height: 1.5; }
+              .blink { animation: b 1.5s infinite; display: inline-block; margin-right: 8px; }
               @keyframes b { 50% { opacity: 0; } }
           </style>
       </head>
       <body>
           <div class="eye-bg"><div class="pupil"></div></div>
           <div class="panel">
-              <div class="title">SENTINELA ATIVO</div>
-              <div class="info">
-                <span class="blink" style="color:#00ff00">●</span> STATUS: ${DOC_CONTROL.status}<br>
-                SISTEMA: MULTI-ATIVOS M15
+              <div class="title">RICARDO TRADER<br>FOREX E BITCOIN</div>
+              <div class="status-box">
+                <span class="blink">●</span> STATUS: ${DOC_CONTROL.status}
               </div>
               <div class="footer">
                   ISO 9001 - DOCUMENTO CONTROLADO<br>

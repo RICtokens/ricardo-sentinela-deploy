@@ -1,29 +1,37 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const { TG_TOKEN, TG_CHAT_ID } = process.env;
+  // CONFIGURAÇÃO DIRETA (SEM VARIÁVEIS PARA TESTE)
+  const token = "8223429851:AAGrFgPQSg5CE2cWGLkr_qMMoW0LNbAzPMM";
+  const chat_id = "7625668696";
 
   try {
-    // DISPARO FORÇADO - TESTE DE CONEXÃO IMEDIATO
-    const msgTeste = `🚨 TESTE DE CONEXÃO\nHORA: ${new Date().toLocaleTimeString('pt-BR')}\nSTATUS: OK`;
+    const agora = new Date().toLocaleTimeString('pt-BR');
     
-    await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+    // Tentativa de envio forçado
+    const resposta = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: TG_CHAT_ID, text: msgTeste })
+      body: JSON.stringify({ 
+        chat_id: chat_id, 
+        text: `🚀 **RICARDO TRADER**\n✅ CONEXÃO ESTABELECIDA!\n⏰ HORA: ${agora}\n\nSe você recebeu isso, o Token está OK!` 
+      })
     });
+
+    const resultado = await resposta.json();
 
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
-      <html><body style="background:blue; color:white; font-family:sans-serif; text-align:center; padding-top:100px;">
-      <h1>TESTE DE DISPARO ENVIADO!</h1>
-      <p>Verifique seu Telegram agora.</p>
-      <p>Se a mensagem chegou, o Token está correto.</p>
-      <p>REVISÃO: 00 | RICARDO TRADER</p>
-      <script>setTimeout(() => { window.location.reload(); }, 15000);</script>
-      </body></html>
+      <body style="background:#000; color:#0f0; font-family:sans-serif; text-align:center; padding:50px;">
+        <h1>SISTEMA DE DIAGNÓSTICO</h1>
+        <p>Tentando enviar para o ID: ${chat_id}</p>
+        <p>Resposta do Telegram: <b>${JSON.stringify(resultado)}</b></p>
+        <hr>
+        <p>Se aparecer "ok: true" acima, veja seu Telegram!</p>
+        <script>setTimeout(() => { window.location.reload(); }, 10000);</script>
+      </body>
     `);
   } catch (e) {
-    return res.status(200).send("Erro no envio: " + e.message);
+    return res.status(200).send("Erro: " + e.message);
   }
 }

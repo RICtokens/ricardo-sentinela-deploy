@@ -15,9 +15,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     for (const ativo of ATIVOS) {
+      // MUDADO PARA 1 MINUTO PARA TESTE DE FLUXO
       const url = ativo.source === "kucoin" 
-        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min`
-        : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=15m&range=2d`;
+        ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
+        : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
 
       const response = await fetch(url);
       const json = await response.json();
@@ -35,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (candles.length < 30) continue;
       const i = candles.length - 1;
 
-      // --- CÁLCULOS V9 SNIPER ---
+      // CÁLCULOS V9 SNIPER
       const calcEMA = (period: number) => {
         const k = 2 / (period + 1);
         let ema = candles[0].c;
@@ -46,7 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const calcRSI = (period: number) => {
         let gains = 0, losses = 0;
         for (let j = i - period; j <= i; j++) {
-          const diff = candles[j].c - candles[j-1].c;
+          const diff = candles[j].c - (candles[j-1]?.c || candles[j].c);
           if (diff >= 0) gains += diff; else losses -= diff;
         }
         const rs = gains / (losses || 1);
@@ -61,7 +62,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const fTopo = candles[i-2].h > candles[i-4].h && candles[i-2].h > candles[i-3].h && candles[i-2].h > candles[i-1].h && candles[i-2].h > candles[i].h;
       const fFundo = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
 
-      // LÓGICA SNIPER V9
       let sinal = null;
       if (fFundo && ema9 > ema21 && rsiVal >= 52 && candles[i].c > candles[i].o) sinal = "ACIMA";
       if (fTopo && ema9 < ema21 && rsiVal <= 48 && candles[i].c < candles[i].o) sinal = "ABAIXO";
@@ -71,11 +71,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               chat_id: chat_id, 
-              text: `🎯 **RT_ROBO SNIPER - V9**\n\n*ATIVO*: ${ativo.label}\n*SINAL*: ${sinal === "ACIMA" ? "🟢 COMPRA" : "🔴 VENDA"}\n*TIMEFRAME*: M15\n*REVISÃO*: 00`,
+              text: `🎯 **TESTE SNIPER V9 (M1)**\n\n*ATIVO*: ${ativo.label}\n*SINAL*: ${sinal === "ACIMA" ? "🟢 COMPRA" : "🔴 VENDA"}`,
               parse_mode: 'Markdown'
             })
           });
@@ -85,12 +84,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
-      <html><head><meta charset="UTF-8"><title>RT_ROBO V9</title>
-      <style>body{background:#000;color:#0f0;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}
-      .panel{border:3px double #0f0;padding:40px;border-radius:20px;text-align:center;box-shadow:0 0 20px #0f0;}</style></head>
-      <body><div class="panel"><h1>RT_ROBO SNIPER V9</h1><p>● MONITORANDO M15</p>
-      <p>STATUS: AGUARDANDO CRITÉRIOS V9</p><p>REVISÃO: 00</p></div>
-      <script>setTimeout(() => { window.location.reload(); }, 60000);</script></body></html>
+      <html><head><meta charset="UTF-8"><title>TESTE V9 M1</title>
+      <style>body{background:#4b0082;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}
+      .panel{border:3px solid #fff;padding:40px;border-radius:20px;text-align:center;}</style></head>
+      <body><div class="panel"><h1>MODO TESTE SNIPER M1</h1><p>Verificando sinais de 1 minuto...</p>
+      <p>Se o Telegram tocar, o sistema está OK.</p></div>
+      <script>setTimeout(() => { window.location.reload(); }, 20000);</script></body></html>
     `);
   } catch (e) { return res.status(200).send("OK"); }
 }

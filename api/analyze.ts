@@ -1,10 +1,10 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 const DOC_CONTROL = {
-    versao: "v2.5.2",
-    revisao: "32",
+    versao: "v2.5.3",
+    revisao: "00",
     data_revisao: "05/02/2026",
-    status: "V9 SNIPER - RESTAURAÇÃO TOTAL"
+    status: "RICARDO TRADER BTC E FOREX"
 };
 
 let lastSinais: Record<string, string> = {};
@@ -21,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const ATIVOS = [
     { symbol: "BTC-USDT", label: "BTCUSD", source: "kucoin" },
     { symbol: "EURUSD=X", label: "EURUSD", source: "yahoo" },
-    { symbol: "JPY=X", label: "USDJPY", source: "yahoo" },
+    { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo" }, // CORRIGIDO
     { symbol: "GBPUSD=X", label: "GBPUSD", source: "yahoo" }
   ];
 
@@ -34,6 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (ativo.source === "kucoin") {
           const resK = await fetch(`https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=15min`);
           const dK = await resK.json();
+          if(!dK.data) continue;
           candles = dK.data.map((v: any) => ({ 
             t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) 
           })).reverse();
@@ -41,6 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const resY = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=15m&range=1d`);
           const dY = await resY.json();
           const r = dY.chart.result[0];
+          if(!r) continue;
           candles = r.timestamp.map((t: number, i: number) => ({
             t, o: r.indicators.quote[0].open[i], c: r.indicators.quote[0].close[i], h: r.indicators.quote[0].high[i], l: r.indicators.quote[0].low[i]
           })).filter((v: any) => v.c !== null);
@@ -49,7 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (candles.length < 30) continue;
         const i = candles.length - 1;
 
-        // --- CÁLCULOS V9 ORIGINAIS ---
+        // LÓGICA V9 ORIGINAL (CONFORME SEU TXT)
         const getEMA = (d: any[], p: number) => {
           const k = 2 / (p + 1);
           let val = d[0].c;
@@ -70,20 +72,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const ema21 = getEMA(candles, 21);
         const rsiVal = calculateRSI(candles, 14);
 
-        // LÓGICA SNIPER V9 (FRACTAL VELA 2)
+        // FRACTAL SNIPER V9
         const fT = candles[i-2].h > candles[i-4].h && candles[i-2].h > candles[i-3].h && candles[i-2].h > candles[i-1].h && candles[i-2].h > candles[i].h;
         const fF = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
 
         let s = null;
-        if (fF && ema9 > ema21 && rsiVal >= 50 && candles[i].c > candles[i].o) s = "ACIMA";
-        if (fT && ema9 < ema21 && rsiVal <= 50 && candles[i].c < candles[i].o) s = "ABAIXO";
+        if (fF && ema9 > ema21 && rsiVal >= 52 && candles[i].c > candles[i].o) s = "ACIMA";
+        if (fT && ema9 < ema21 && rsiVal <= 48 && candles[i].c < candles[i].o) s = "ABAIXO";
 
         if (s) {
           const sid = `${ativo.label}_${candles[i].t}_${s}`;
           if (sid !== lastSinais[ativo.label]) {
             lastSinais[ativo.label] = sid;
             const emoji = s === "ACIMA" ? "🟢" : "🔴";
-            const message = `*SINAL CONFIRMADO*\n*ATIVO*: *${ativo.label}*\n*SINAL*: ${emoji} *${s}*\n*VERSÃO*: V9 PURA`;
+            const message = `*SINAL CONFIRMADO*\n*ATIVO*: *${ativo.label}*\n*SINAL*: ${emoji} *${s}*\n*ESTRATÉGIA*: V9 SNIPER`;
             
             await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
               method: 'POST',
@@ -95,35 +97,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } catch (e) { console.error(e); }
     }
 
-    // --- RESTAURAÇÃO DA PÁGINA VISUAL ---
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
       <!DOCTYPE html>
-      <html>
+      <html lang="pt-br">
       <head>
-          <title>RICARDO SENTINELA V9</title>
           <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>RICARDO TRADER BTC E FOREX</title>
           <style>
-              body { background: #000; color: #0f0; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-              .panel { border: 2px solid #0f0; padding: 40px; border-radius: 20px; text-align: center; box-shadow: 0 0 20px #0f0; }
-              .dot { height: 15px; width: 15px; background-color: #0f0; border-radius: 50%; display: inline-block; animation: blink 1s infinite; margin-right: 10px; }
+              body { background: #050505; color: #00ff00; font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+              .panel { border: 3px double #00ff00; padding: 40px; border-radius: 25px; text-align: center; background: #000; box-shadow: 0 0 30px rgba(0,255,0,0.3); }
+              .dot { height: 15px; width: 15px; background-color: #00ff00; border-radius: 50%; display: inline-block; animation: blink 1s infinite; margin-right: 10px; }
               @keyframes blink { 50% { opacity: 0; } }
-              h1 { color: #fff; margin-bottom: 10px; }
-              .status { font-size: 1.2em; font-weight: bold; }
+              h1 { color: #fff; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 20px; }
+              .info { color: #ccc; margin-bottom: 20px; line-height: 1.6; }
+              .footer { font-size: 0.8em; color: #444; border-top: 1px solid #222; padding-top: 15px; }
           </style>
       </head>
       <body>
           <div class="panel">
-              <h1>SENTINELA V9</h1>
-              <div class="status"><span class="dot"></span> MONITORANDO ATIVOS...</div>
-              <p>BTCUSD | EURUSD | GBPUSD | USDJPY</p>
-              <div style="font-size: 0.8em; color: #666; margin-top: 20px;">
-                  Sincronizado com RT_ROBO SNIPER V9<br>
-                  Versão: ${DOC_CONTROL.versao} | Revisão: ${DOC_CONTROL.revisao}
+              <h1>RICARDO TRADER BTC E FOREX</h1>
+              <div style="margin-bottom: 20px;"><span class="dot"></span> MONITORAMENTO V9 ATIVO</div>
+              <div class="info">
+                FOREX: <b>${forexAberto ? 'ABERTO ✅' : 'FECHADO 🔒'}</b><br>
+                ATIVOS: BTCUSD | EURUSD | USDJPY | GBPUSD
+              </div>
+              <div class="footer">
+                  REVISÃO: ${DOC_CONTROL.revisao} | DATA: ${DOC_CONTROL.data_revisao}<br>
+                  STATUS: ${DOC_CONTROL.status}
               </div>
           </div>
       </body>
       </html>
     `);
-  } catch (e) { return res.status(200).send("Sistema Operacional"); }
+  } catch (e) { return res.status(200).send("OK"); }
 }

@@ -1,12 +1,12 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Trava para evitar repetição na mesma vela
+// Trava global para evitar duplicidade na mesma vela/ativo
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "RT-PRO-TURBO-V1";
+  const versao = "RT-PRO-PRECISION-V2";
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
   const ATIVOS = [
@@ -40,9 +40,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (c.length < 50) continue;
       
       const i = c.length - 1; 
-      const s = i - 2; // VELA DE SINAL (Conforme script RT_PRO)
+      const s = i - 2; // Analisando a vela onde a seta aparece (Vela [2])
 
-      // --- CÁLCULOS TÉCNICOS ---
+      // --- CÁLCULOS TÉCNICOS RT_PRO ---
       const getEMA = (p: number, idx: number) => {
         const k = 2 / (p + 1);
         let ema = c[idx - 40].c; 
@@ -59,6 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
+      // Indicadores na vela do sinal (s)
       const macd_s = getEMA(12, s) - getEMA(26, s);
       const signal_s = getEMA(9, s);
       const rsi_s = getRSI(s, 9);
@@ -66,14 +67,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const mom_s = c[s].c - c[s - 10].c;
       const mom_prev = c[s - 1].c - c[s - 11].c;
 
-      // FRACTAL (Vela S comparada com S-2, S-1, S+1, S+2)
+      // Dinapoli Stoch Simples
+      const low14 = Math.min(...c.slice(s - 13, s + 1).map(v => v.l));
+      const high14 = Math.max(...c.slice(s - 13, s + 1).map(v => v.h));
+      const fast_k = ((c[s].c - low14) / (high14 - low14)) * 100;
+
+      // Fractal de 5 barras (Vela S é o centro)
       const f_topo = c[s].h > c[s-2].h && c[s].h > c[s-1].h && c[s].h > c[s+1].h && c[s].h > c[s+2].h;
       const f_fundo = c[s].l < c[s-2].l && c[s].l < c[s-1].l && c[s].l < c[s+1].l && c[s].l < c[s+2].l;
 
-      // --- LÓGICA DE SINAL ---
+      // --- LÓGICA DE DISPARO REVISADA ---
       let sinalStr = "";
-      if (f_fundo && macd_s > signal_s && rsi_s > rsi_prev && mom_s > mom_prev) sinalStr = "ACIMA";
-      if (f_topo && macd_s < signal_s && rsi_s < rsi_prev && mom_s < mom_prev) sinalStr = "ABAIXO";
+
+      // Prioridade ao Fractal + MACD (Motores da Seta)
+      if (f_fundo && macd_s > signal_s) {
+          // Confirmação de suporte (RSI ou Momentum ou Stoch)
+          if (rsi_s >= rsi_prev || mom_s >= mom_prev || fast_k > 40) sinalStr = "ACIMA";
+      }
+      
+      if (f_topo && macd_s < signal_s) {
+          // Confirmação de resistência (RSI ou Momentum ou Stoch)
+          if (rsi_s <= rsi_prev || mom_s <= mom_prev || fast_k < 60) sinalStr = "ABAIXO";
+      }
 
       if (sinalStr) {
         const sid = `${ativo.label}_${sinalStr}_${c[s].t}`;

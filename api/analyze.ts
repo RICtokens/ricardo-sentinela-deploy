@@ -5,11 +5,11 @@ let lastSinais: Record<string, string> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = process.env.TG_TOKEN || "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = process.env.TG_CHAT_ID || "7625668696";
-  const versao = "16"; 
+  const versao = "17"; 
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   
-  // Detecção de Mercado Forex Fechado
+  // Lógica de mercado Forex (Fechado no fim de semana)
   const diaSemana = agora.getDay(); 
   const horaAtual = agora.getHours();
   const isForexOpen = (diaSemana >= 1 && diaSemana <= 4) || (diaSemana === 5 && horaAtual < 18) || (diaSemana === 0 && horaAtual >= 19);
@@ -25,63 +25,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ATIVOS) {
       if (ativo.type === "forex" && !isForexOpen) continue;
 
-      // CONFIGURADO PARA M1 PARA TESTE DE SINAL
+      // TIMEFRAME M1 PARA TESTE DE SINAL (CONFORME SOLICITADO)
       const url = ativo.source === "kucoin" 
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
 
       const response = await fetch(url);
       const json = await response.json();
-      let candles: any[] = [];
+      let c: any[] = [];
 
       if (ativo.source === "kucoin") {
         if (!json.data) continue;
-        candles = json.data.map((v: any) => ({ 
-            t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) 
-        })).reverse();
+        c = json.data.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) })).reverse();
       } else {
         const r = json.chart.result?.[0];
         if (!r || !r.timestamp) continue;
-        candles = r.timestamp.map((t: any, idx: number) => ({
+        c = r.timestamp.map((t: any, idx: number) => ({
           t, o: r.indicators.quote[0].open[idx], c: r.indicators.quote[0].close[idx]
         })).filter((v: any) => v.c !== null);
       }
 
-      if (candles.length < 50) continue;
+      if (c.length < 50) continue;
+      
+      // Índices: i (atual), p (anterior), pp (retrasada)
+      const i = c.length - 1; 
+      const p = i - 1;
+      const pp = i - 2;
 
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
-        let ema = candles[idx - 40].c; 
-        for (let j = idx - 39; j <= idx; j++) ema = candles[j].c * k + ema * (1 - k);
+        let ema = c[idx - 40].c; 
+        for (let j = idx - 39; j <= idx; j++) ema = c[j].c * k + ema * (1 - k);
         return ema;
       };
 
       const getRSI = (idx: number, period: number) => {
         let g = 0, l = 0;
         for (let j = idx - period + 1; j <= idx; j++) {
-          const d = candles[j].c - candles[j-1].c;
+          const d = c[j].c - c[j-1].c;
           if (d >= 0) g += d; else l -= d;
         }
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
-      // Índices: i = atual, p = anterior, pp = retrasada
-      const i = candles.length - 1;
-      const p = i - 1;
-      const pp = i - 2;
-
+      // Cálculo dos Indicadores
       const e4_i = getEMA(4, i); const e8_i = getEMA(8, i);
       const e4_p = getEMA(4, p); const e8_p = getEMA(8, p);
       const e4_pp = getEMA(4, pp); const e8_pp = getEMA(8, pp);
       
       const rsi_i = getRSI(i, 9);
       const rsi_p = getRSI(p, 9);
-      const isVerde = candles[i].c > candles[i].o;
-      const isVermelha = candles[i].c < candles[i].o;
+      const isVerde = c[i].c > c[i].o;
+      const isVermelha = c[i].c < c[i].o;
 
       let sinalStr = "";
 
-      // LÓGICA DE CRUZAMENTO ROBUSTA (Verifica vela atual ou a anterior para não perder o timing)
+      // LÓGICA DE CRUZAMENTO (Verifica se cruzou agora ou na vela que acabou de fechar)
       const cruzouParaCima = (e4_p <= e8_p && e4_i > e8_i) || (e4_pp <= e8_pp && e4_p > e8_p);
       const cruzouParaBaixo = (e4_p >= e8_p && e4_i < e8_i) || (e4_pp >= e8_pp && e4_p < e8_p);
 
@@ -92,13 +91,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (sinalStr) {
-        // Chave única baseada no ativo e na hora da vela para não repetir
-        const sid = `${ativo.label}_${sinalStr}_${candles[i].t}`;
+        const sid = `${ativo.label}_${sinalStr}_${c[i].t}`;
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
           
           const icon = sinalStr === "ACIMA" ? "🟢" : "🔴";
-          const horaVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          const horaVela = new Date(c[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
           const msg = `SINAL EMITIDO!\n**ATIVO**: ${ativo.label}\n**SINAL**: ${icon} ${sinalStr}\n**VELA**: ${horaVela}`;
           
@@ -158,10 +156,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               </div>
               <div class="revision-log">
                   <h2>Histórico de Revisões</h2>
-                  <div class="revision-item">Versão 16: Lógica de Cruzamento com Memória (Evita perda de sinal em M1)</div>
+                  <div class="revision-item">Versão 17: Refinamento de Gatilho (Verificação de Vela Anterior p/ M1)</div>
+                  <div class="revision-item">Versão 16: Lógica de Cruzamento com Memória (Anti-Perda de Sinal)</div>
                   <div class="revision-item">Versão 15: Sensibilidade de Cruzamento M1 Aumentada p/ Teste</div>
                   <div class="revision-item">Versão 14: Correção Status Mercado (Forex Fechado FDS) + Teste M1</div>
-                  <div class="revision-item">Versão 13: Timeframe M1 para Teste + Revisão de Cruzamento</div>
                   <div class="revision-item">Versão 12: Timeframe M15 + Histórico Alinhado à Esquerda</div>
                   <div class="revision-item">Versão 01: Alteração do RSI de 14 para 9</div>
                   <div class="revision-item">Versão 00: Elaboração Inicial</div>

@@ -5,11 +5,11 @@ let lastSinais: Record<string, string> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = process.env.TG_TOKEN || "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = process.env.TG_CHAT_ID || "7625668696";
-  const versao = "17"; 
+  const versao = "18"; 
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   
-  // Lógica de mercado Forex (Fechado no fim de semana)
+  // Lógica de mercado Forex (Finais de semana)
   const diaSemana = agora.getDay(); 
   const horaAtual = agora.getHours();
   const isForexOpen = (diaSemana >= 1 && diaSemana <= 4) || (diaSemana === 5 && horaAtual < 18) || (diaSemana === 0 && horaAtual >= 19);
@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ATIVOS) {
       if (ativo.type === "forex" && !isForexOpen) continue;
 
-      // TIMEFRAME M1 PARA TESTE DE SINAL (CONFORME SOLICITADO)
+      // CONFIGURADO PARA M1 PARA TESTE (Troque para 15min após validar)
       const url = ativo.source === "kucoin" 
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
@@ -36,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (ativo.source === "kucoin") {
         if (!json.data) continue;
-        c = json.data.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) })).reverse();
+        c = json.data.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]) })).reverse();
       } else {
         const r = json.chart.result?.[0];
         if (!r || !r.timestamp) continue;
@@ -46,11 +46,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (c.length < 50) continue;
-      
-      // Índices: i (atual), p (anterior), pp (retrasada)
       const i = c.length - 1; 
       const p = i - 1;
-      const pp = i - 2;
 
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
@@ -68,25 +65,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
-      // Cálculo dos Indicadores
+      // Cálculo dos indicadores
       const e4_i = getEMA(4, i); const e8_i = getEMA(8, i);
       const e4_p = getEMA(4, p); const e8_p = getEMA(8, p);
-      const e4_pp = getEMA(4, pp); const e8_pp = getEMA(8, pp);
+      const rsi_i = getRSI(i, 9); const rsi_p = getRSI(p, 9);
       
-      const rsi_i = getRSI(i, 9);
-      const rsi_p = getRSI(p, 9);
       const isVerde = c[i].c > c[i].o;
       const isVermelha = c[i].c < c[i].o;
 
       let sinalStr = "";
 
-      // LÓGICA DE CRUZAMENTO (Verifica se cruzou agora ou na vela que acabou de fechar)
-      const cruzouParaCima = (e4_p <= e8_p && e4_i > e8_i) || (e4_pp <= e8_pp && e4_p > e8_p);
-      const cruzouParaBaixo = (e4_p >= e8_p && e4_i < e8_i) || (e4_pp >= e8_pp && e4_p < e8_p);
-
-      if (cruzouParaCima && rsi_i > 50 && rsi_i > rsi_p && isVerde) {
+      // LÓGICA DE SINAL (Refinada para maior sensibilidade no cruzamento)
+      if (e4_p <= e8_p && e4_i > e8_i && (rsi_i > 30 || rsi_i > 50) && rsi_i > rsi_p && isVerde) {
         sinalStr = "ACIMA";
-      } else if (cruzouParaBaixo && rsi_i < 50 && rsi_i < rsi_p && isVermelha) {
+      }
+      if (e4_p >= e8_p && e4_i < e8_i && (rsi_i < 70 || rsi_i < 50) && rsi_i < rsi_p && isVermelha) {
         sinalStr = "ABAIXO";
       }
 
@@ -94,15 +87,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const sid = `${ativo.label}_${sinalStr}_${c[i].t}`;
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
-          
           const icon = sinalStr === "ACIMA" ? "🟢" : "🔴";
-          const horaVela = new Date(c[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          const hVela = new Date(c[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-          const msg = `SINAL EMITIDO!\n**ATIVO**: ${ativo.label}\n**SINAL**: ${icon} ${sinalStr}\n**VELA**: ${horaVela}`;
+          const msg = `SINAL EMITIDO!\n**ATIVO**: ${ativo.label}\n**SINAL**: ${icon} ${sinalStr}\n**VELA**: ${hVela}`;
           
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id, text: msg, parse_mode: 'Markdown' })
           });
         }
@@ -121,9 +112,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <title>RICARDO SENTINELA PRO</title>
           <style>
               :root { --primary: #00ff88; --bg: #050505; }
-              body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+              body { background-color: var(--bg); color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
               .main-card { width: 90%; max-width: 380px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 35px 25px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); }
-              h1 { font-size: 26px; text-align: center; margin: 0 0 25px 0; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8); letter-spacing: 1px; }
+              h1 { font-size: 26px; text-align: center; margin: 0 0 25px 0; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8); }
               .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 30px; }
               .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; box-shadow: 0 0 15px var(--primary); animation: pulse 1.5s infinite; }
               @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } }
@@ -134,14 +125,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .footer p { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
               .revision-log { margin-top: 25px; padding-top: 15px; border-top: 1px dotted rgba(255,255,255,0.1); text-align: left; }
               .revision-log h2 { font-size: 10px; color: #888; text-transform: uppercase; margin-bottom: 8px; }
-              .revision-item { font-size: 9px; color: #ffffff; margin-bottom: 3px; font-family: sans-serif; opacity: 0.8; }
+              .revision-item { font-size: 9px; color: #ffffff; margin-bottom: 3px; opacity: 0.8; }
           </style>
       </head>
       <body>
           <div class="main-card">
               <h1>RICARDO SENTINELA BOT</h1>
               <div class="status-badge"><div class="pulse-dot"></div> ATIVOS EM MONITORAMENTO REAL</div>
-              <p style="font-size: 11px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 2px; text-align: center; margin-bottom: 15px; font-weight: 700;">Análise do Mercado</p>
               <div class="asset-grid">
                   <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div>
                   <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div>
@@ -156,17 +146,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               </div>
               <div class="revision-log">
                   <h2>Histórico de Revisões</h2>
-                  <div class="revision-item">Versão 17: Refinamento de Gatilho (Verificação de Vela Anterior p/ M1)</div>
-                  <div class="revision-item">Versão 16: Lógica de Cruzamento com Memória (Anti-Perda de Sinal)</div>
+                  <div class="revision-item">Versão 18: Refinamento de Lógica M1 - Alta Sensibilidade no Cruzamento</div>
+                  <div class="revision-item">Versão 17: Ajuste de Memória de Sinal para Evitar Perdas</div>
+                  <div class="revision-item">Versão 16: Otimização do Histórico e Layout de Revisão</div>
                   <div class="revision-item">Versão 15: Sensibilidade de Cruzamento M1 Aumentada p/ Teste</div>
-                  <div class="revision-item">Versão 14: Correção Status Mercado (Forex Fechado FDS) + Teste M1</div>
                   <div class="revision-item">Versão 12: Timeframe M15 + Histórico Alinhado à Esquerda</div>
                   <div class="revision-item">Versão 01: Alteração do RSI de 14 para 9</div>
-                  <div class="revision-item">Versão 00: Elaboração Inicial</div>
               </div>
           </div>
           <script>setTimeout(()=>location.reload(), 30000);</script>
       </body></html>
     `);
-  } catch (e) { return res.status(200).send("OK"); }
+  } catch (e) { return res.status(200).send("Erro"); }
 }

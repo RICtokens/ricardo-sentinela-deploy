@@ -3,22 +3,29 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Configurações vindas das Environment Variables da Vercel
   const token = process.env.TG_TOKEN || "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = process.env.TG_CHAT_ID || "7625668696";
-  const versao = "13"; 
-  const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const versao = "15"; 
+  const agora = new Date();
+  const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  
+  // Lógica de mercado Forex (Fechado FDS)
+  const diaSemana = agora.getDay(); 
+  const horaAtual = agora.getHours();
+  const isForexOpen = (diaSemana >= 1 && diaSemana <= 4) || (diaSemana === 5 && horaAtual < 18) || (diaSemana === 0 && horaAtual >= 19);
 
   const ATIVOS = [
-    { symbol: "BTC-USDT", label: "BTCUSD", source: "kucoin" },
-    { symbol: "EURUSD=X", label: "EURUSD", source: "yahoo" },
-    { symbol: "GBPUSD=X", label: "GBPUSD", source: "yahoo" },
-    { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo" }
+    { symbol: "BTC-USDT", label: "BTCUSD", source: "kucoin", type: "crypto" },
+    { symbol: "EURUSD=X", label: "EURUSD", source: "yahoo", type: "forex" },
+    { symbol: "GBPUSD=X", label: "GBPUSD", source: "yahoo", type: "forex" },
+    { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo", type: "forex" }
   ];
 
   try {
     for (const ativo of ATIVOS) {
-      // ALTERADO PARA M1 PARA TESTE DE SINAIS (CONFORME SOLICITADO)
+      if (ativo.type === "forex" && !isForexOpen) continue;
+
+      // CONFIGURADO PARA M1 PARA TESTE (CONFORME SOLICITADO)
       const url = ativo.source === "kucoin" 
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
@@ -31,10 +38,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!json.data) continue;
         c = json.data.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) })).reverse();
       } else {
-        const r = json.chart.result[0];
+        const r = json.chart.result?.[0];
         if (!r || !r.timestamp) continue;
         c = r.timestamp.map((t: any, idx: number) => ({
-          t, o: r.indicators.quote[0].open[idx], c: r.indicators.quote[0].close[idx], h: r.indicators.quote[0].high[idx], l: r.indicators.quote[0].low[idx]
+          t, o: r.indicators.quote[0].open[idx], c: r.indicators.quote[0].close[idx]
         })).filter((v: any) => v.c !== null);
       }
 
@@ -42,7 +49,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const i = c.length - 1; 
       const p = i - 1;
 
-      // Cálculo EMA 4 e 8
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
         let ema = c[idx - 40].c; 
@@ -50,7 +56,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return ema;
       };
 
-      // Cálculo RSI 9
       const getRSI = (idx: number, period: number) => {
         let g = 0, l = 0;
         for (let j = idx - period + 1; j <= idx; j++) {
@@ -60,23 +65,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
-      const e4_atual = getEMA(4, i);
-      const e8_atual = getEMA(8, i);
-      const e4_prev = getEMA(4, p);
-      const e8_prev = getEMA(8, p);
-      const rsi9 = getRSI(i, 9);
-      const rsi9_prev = getRSI(p, 9);
+      // Indicadores Atuais e Anteriores
+      const e4_i = getEMA(4, i); const e8_i = getEMA(8, i);
+      const e4_p = getEMA(4, p); const e8_p = getEMA(8, p);
+      const rsi_i = getRSI(i, 9); const rsi_p = getRSI(p, 9);
       const isVerde = c[i].c > c[i].o;
       const isVermelha = c[i].c < c[i].o;
 
       let sinalStr = "";
 
-      // LÓGICA SINAL ACIMA (EMA 4 cruza p/ cima EMA 8 + RSI 9 > 50 + RSI inclinado p/ cima + Vela Verde)
-      if (e4_prev <= e8_prev && e4_atual > e8_atual && rsi9 > 50 && rsi9 > rsi9_prev && isVerde) {
+      // LÓGICA REFINADA PARA M1: Detecta o cruzamento exato
+      if (e4_p <= e8_p && e4_i > e8_i && rsi_i > 50 && rsi_i > rsi_p && isVerde) {
         sinalStr = "ACIMA";
       }
-      // LÓGICA SINAL ABAIXO (EMA 4 cruza p/ baixo EMA 8 + RSI 9 < 50 + RSI inclinado p/ baixo + Vela Vermelha)
-      if (e4_prev >= e8_prev && e4_atual < e8_atual && rsi9 < 50 && rsi9 < rsi9_prev && isVermelha) {
+      if (e4_p >= e8_p && e4_i < e8_i && rsi_i < 50 && rsi_i < rsi_p && isVermelha) {
         sinalStr = "ABAIXO";
       }
 
@@ -97,6 +99,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
+    const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
+
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
       <!DOCTYPE html>
@@ -113,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; box-shadow: 0 0 15px var(--primary); animation: pulse 1.5s infinite; }
               @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } }
               .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 14px 18px; border-radius: 16px; display: flex; justify-content: space-between; margin-bottom: 10px; }
-              .status-pill { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 6px; background: rgba(0,255,136,0.15); color: var(--primary); }
+              .status-pill { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 6px; }
               .footer { margin-top: 35px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-size: 11px; }
               .footer b { color: #888; display: block; font-size: 9px; text-transform: uppercase; margin-bottom: 2px; }
               .footer p { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
@@ -128,33 +133,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               <div class="status-badge"><div class="pulse-dot"></div> ATIVOS EM MONITORAMENTO REAL</div>
               <p style="font-size: 11px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 2px; text-align: center; margin-bottom: 15px; font-weight: 700;">Análise do Mercado</p>
               <div class="asset-grid">
-                  <div class="asset-card"><span>BTCUSD</span><span class="status-pill">ABERTO</span></div>
-                  <div class="asset-card"><span>EURUSD</span><span class="status-pill">ABERTO</span></div>
-                  <div class="asset-card"><span>GBPUSD</span><span class="status-pill">ABERTO</span></div>
-                  <div class="asset-card"><span>USDJPY</span><span class="status-pill">ABERTO</span></div>
+                  <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div>
+                  <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div>
+                  <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div>
+                  <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div>
               </div>
               <div class="footer">
                   <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div>
                   <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div>
                   <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div>
-                  <div><b>STATUS</b><p style="color:var(--primary)">TESTE M1</p></div>
+                  <div><b>STATUS</b><p style="color:var(--primary)">ONLINE (TESTE M1)</p></div>
               </div>
               <div class="revision-log">
                   <h2>Histórico de Revisões</h2>
-                  <div class="revision-item">Versão 13: Timeframe M1 para Teste + Revisão de Lógica de Cruzamento</div>
-                  <div class="revision-item">Versão 12: Timeframe M15 + Histórico Alinhado à Esquerda (Fonte Branca)</div>
+                  <div class="revision-item">Versão 15: Sensibilidade de Cruzamento M1 Aumentada p/ Teste</div>
+                  <div class="revision-item">Versão 14: Correção Status Mercado (Forex Fechado FDS) + Teste M1</div>
+                  <div class="revision-item">Versão 13: Timeframe M1 para Teste + Revisão de Cruzamento</div>
+                  <div class="revision-item">Versão 12: Timeframe M15 + Histórico Alinhado à Esquerda</div>
                   <div class="revision-item">Versão 11: Lógica Final EMA 4/8 + RSI 9 + Cor da Vela</div>
                   <div class="revision-item">Versão 10: Migração para Timeframe M15</div>
                   <div class="revision-item">Versão 09: Refinamento de Inclinação RSI e Layout</div>
-                  <div class="revision-item">Versão 08: Ajuste Timeframe M1 para Teste</div>
-                  <div class="revision-item">Versão 07: Lógica EMA 4/8 + RSI 9 + Cor Vela</div>
-                  <div class="revision-item">Versão 06: Remoção de Fractais e Implementação EMA 9/21</div>
-                  <div class="revision-item">Versão 02: Ajuste de Layout e Variáveis Vercel</div>
                   <div class="revision-item">Versão 01: Alteração do RSI de 14 para 9</div>
                   <div class="revision-item">Versão 00: Elaboração Inicial</div>
               </div>
           </div>
-          <script>setTimeout(()=>location.reload(), 60000);</script>
+          <script>setTimeout(()=>location.reload(), 30000);</script>
       </body></html>
     `);
   } catch (e) { return res.status(200).send("OK"); }

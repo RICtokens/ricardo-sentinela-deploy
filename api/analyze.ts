@@ -1,11 +1,12 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
+// Trava para evitar repetição na mesma vela
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "00-M1-RT-PRECISION";
+  const versao = "RT-PRO-TURBO-V1";
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
   const ATIVOS = [
@@ -38,11 +39,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (c.length < 50) continue;
       
-      // i é a vela ATUAL. O sinal (seta) no seu script ocorre na vela i-2 (duas atrás)
       const i = c.length - 1; 
-      const s = i - 2; // Índice do Sinal
+      const s = i - 2; // VELA DE SINAL (Conforme script RT_PRO)
 
-      // --- FUNÇÕES DE CÁLCULO ---
+      // --- CÁLCULOS TÉCNICOS ---
       const getEMA = (p: number, idx: number) => {
         const k = 2 / (p + 1);
         let ema = c[idx - 40].c; 
@@ -59,7 +59,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
-      // --- CÁLCULOS NA VELA DO SINAL (s) ---
       const macd_s = getEMA(12, s) - getEMA(26, s);
       const signal_s = getEMA(9, s);
       const rsi_s = getRSI(s, 9);
@@ -67,24 +66,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const mom_s = c[s].c - c[s - 10].c;
       const mom_prev = c[s - 1].c - c[s - 11].c;
 
-      // DiNapoli Stochastic Simples na vela do sinal
-      const low14 = Math.min(...c.slice(s - 13, s + 1).map(v => v.l));
-      const high14 = Math.max(...c.slice(s - 13, s + 1).map(v => v.h));
-      const fast_k = ((c[s].c - low14) / (high14 - low14)) * 100;
-
-      // FRACTAL (A vela S comparada com S-2, S-1, S+1, S+2)
+      // FRACTAL (Vela S comparada com S-2, S-1, S+1, S+2)
       const f_topo = c[s].h > c[s-2].h && c[s].h > c[s-1].h && c[s].h > c[s+1].h && c[s].h > c[s+2].h;
       const f_fundo = c[s].l < c[s-2].l && c[s].l < c[s-1].l && c[s].l < c[s+1].l && c[s].l < c[s+2].l;
 
+      // --- LÓGICA DE SINAL ---
       let sinalStr = "";
-      if (f_fundo && macd_s > signal_s && rsi_s > rsi_prev && fast_k > 50 && mom_s > mom_prev) sinalStr = "ACIMA";
-      if (f_topo && macd_s < signal_s && rsi_s < rsi_prev && fast_k < 50 && mom_s < mom_prev) sinalStr = "ABAIXO";
+      if (f_fundo && macd_s > signal_s && rsi_s > rsi_prev && mom_s > mom_prev) sinalStr = "ACIMA";
+      if (f_topo && macd_s < signal_s && rsi_s < rsi_prev && mom_s < mom_prev) sinalStr = "ABAIXO";
 
       if (sinalStr) {
         const sid = `${ativo.label}_${sinalStr}_${c[s].t}`;
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
-          const msg = `**SINAL CONFIRMADO (RT_PRO)**\n\n**ATIVO**: ${ativo.label}\n**SINAL**: ${sinalStr === "ACIMA" ? "🟢" : "🔴"} ${sinalStr}\n**VELA**: ${new Date(c[s].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
+          const msg = `**🚨 SINAL CONFIRMADO**\n\n**ATIVO**: ${ativo.label}\n**SINAL**: ${sinalStr === "ACIMA" ? "🟢 ACIMA" : "🔴 ABAIXO"}\n**VELA**: ${new Date(c[s].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
+          
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id, text: msg, parse_mode: 'Markdown' })
@@ -133,7 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   <div><b>STATUS</b><p style="color:var(--primary)">ONLINE</p></div>
               </div>
           </div>
-          <script>setTimeout(()=>location.reload(), 30000);</script>
+          <script>setTimeout(()=>location.reload(), 15000);</script>
       </body></html>
     `);
   } catch (e) { return res.status(200).send("SERVER ONLINE"); }

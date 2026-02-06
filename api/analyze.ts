@@ -5,11 +5,11 @@ let lastSinais: Record<string, string> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = process.env.TG_TOKEN || "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = process.env.TG_CHAT_ID || "7625668696";
-  const versao = "15"; 
+  const versao = "16"; 
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   
-  // Lógica de mercado Forex (Fechado FDS)
+  // Detecção de Mercado Forex Fechado
   const diaSemana = agora.getDay(); 
   const horaAtual = agora.getHours();
   const isForexOpen = (diaSemana >= 1 && diaSemana <= 4) || (diaSemana === 5 && horaAtual < 18) || (diaSemana === 0 && horaAtual >= 19);
@@ -25,74 +25,86 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ativo of ATIVOS) {
       if (ativo.type === "forex" && !isForexOpen) continue;
 
-      // CONFIGURADO PARA M1 PARA TESTE (CONFORME SOLICITADO)
+      // CONFIGURADO PARA M1 PARA TESTE DE SINAL
       const url = ativo.source === "kucoin" 
         ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
         : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
 
       const response = await fetch(url);
       const json = await response.json();
-      let c: any[] = [];
+      let candles: any[] = [];
 
       if (ativo.source === "kucoin") {
         if (!json.data) continue;
-        c = json.data.map((v: any) => ({ t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) })).reverse();
+        candles = json.data.map((v: any) => ({ 
+            t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) 
+        })).reverse();
       } else {
         const r = json.chart.result?.[0];
         if (!r || !r.timestamp) continue;
-        c = r.timestamp.map((t: any, idx: number) => ({
+        candles = r.timestamp.map((t: any, idx: number) => ({
           t, o: r.indicators.quote[0].open[idx], c: r.indicators.quote[0].close[idx]
         })).filter((v: any) => v.c !== null);
       }
 
-      if (c.length < 50) continue;
-      const i = c.length - 1; 
-      const p = i - 1;
+      if (candles.length < 50) continue;
 
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
-        let ema = c[idx - 40].c; 
-        for (let j = idx - 39; j <= idx; j++) ema = c[j].c * k + ema * (1 - k);
+        let ema = candles[idx - 40].c; 
+        for (let j = idx - 39; j <= idx; j++) ema = candles[j].c * k + ema * (1 - k);
         return ema;
       };
 
       const getRSI = (idx: number, period: number) => {
         let g = 0, l = 0;
         for (let j = idx - period + 1; j <= idx; j++) {
-          const d = c[j].c - c[j-1].c;
+          const d = candles[j].c - candles[j-1].c;
           if (d >= 0) g += d; else l -= d;
         }
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
-      // Indicadores Atuais e Anteriores
+      // Índices: i = atual, p = anterior, pp = retrasada
+      const i = candles.length - 1;
+      const p = i - 1;
+      const pp = i - 2;
+
       const e4_i = getEMA(4, i); const e8_i = getEMA(8, i);
       const e4_p = getEMA(4, p); const e8_p = getEMA(8, p);
-      const rsi_i = getRSI(i, 9); const rsi_p = getRSI(p, 9);
-      const isVerde = c[i].c > c[i].o;
-      const isVermelha = c[i].c < c[i].o;
+      const e4_pp = getEMA(4, pp); const e8_pp = getEMA(8, pp);
+      
+      const rsi_i = getRSI(i, 9);
+      const rsi_p = getRSI(p, 9);
+      const isVerde = candles[i].c > candles[i].o;
+      const isVermelha = candles[i].c < candles[i].o;
 
       let sinalStr = "";
 
-      // LÓGICA REFINADA PARA M1: Detecta o cruzamento exato
-      if (e4_p <= e8_p && e4_i > e8_i && rsi_i > 50 && rsi_i > rsi_p && isVerde) {
+      // LÓGICA DE CRUZAMENTO ROBUSTA (Verifica vela atual ou a anterior para não perder o timing)
+      const cruzouParaCima = (e4_p <= e8_p && e4_i > e8_i) || (e4_pp <= e8_pp && e4_p > e8_p);
+      const cruzouParaBaixo = (e4_p >= e8_p && e4_i < e8_i) || (e4_pp >= e8_pp && e4_p < e8_p);
+
+      if (cruzouParaCima && rsi_i > 50 && rsi_i > rsi_p && isVerde) {
         sinalStr = "ACIMA";
-      }
-      if (e4_p >= e8_p && e4_i < e8_i && rsi_i < 50 && rsi_i < rsi_p && isVermelha) {
+      } else if (cruzouParaBaixo && rsi_i < 50 && rsi_i < rsi_p && isVermelha) {
         sinalStr = "ABAIXO";
       }
 
       if (sinalStr) {
-        const sid = `${ativo.label}_${sinalStr}_${c[i].t}`;
+        // Chave única baseada no ativo e na hora da vela para não repetir
+        const sid = `${ativo.label}_${sinalStr}_${candles[i].t}`;
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
+          
           const icon = sinalStr === "ACIMA" ? "🟢" : "🔴";
-          const horaVela = new Date(c[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          const horaVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
           const msg = `SINAL EMITIDO!\n**ATIVO**: ${ativo.label}\n**SINAL**: ${icon} ${sinalStr}\n**VELA**: ${horaVela}`;
           
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id, text: msg, parse_mode: 'Markdown' })
           });
         }
@@ -113,7 +125,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               :root { --primary: #00ff88; --bg: #050505; }
               body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
               .main-card { width: 90%; max-width: 380px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 35px 25px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); }
-              h1 { font-size: 26px; text-align: center; margin: 0 0 25px 0; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8), 0 0 20px rgba(255,255,255,0.4); letter-spacing: 1px; }
+              h1 { font-size: 26px; text-align: center; margin: 0 0 25px 0; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8); letter-spacing: 1px; }
               .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 30px; }
               .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; box-shadow: 0 0 15px var(--primary); animation: pulse 1.5s infinite; }
               @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } }
@@ -146,13 +158,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               </div>
               <div class="revision-log">
                   <h2>Histórico de Revisões</h2>
+                  <div class="revision-item">Versão 16: Lógica de Cruzamento com Memória (Evita perda de sinal em M1)</div>
                   <div class="revision-item">Versão 15: Sensibilidade de Cruzamento M1 Aumentada p/ Teste</div>
                   <div class="revision-item">Versão 14: Correção Status Mercado (Forex Fechado FDS) + Teste M1</div>
                   <div class="revision-item">Versão 13: Timeframe M1 para Teste + Revisão de Cruzamento</div>
                   <div class="revision-item">Versão 12: Timeframe M15 + Histórico Alinhado à Esquerda</div>
-                  <div class="revision-item">Versão 11: Lógica Final EMA 4/8 + RSI 9 + Cor da Vela</div>
-                  <div class="revision-item">Versão 10: Migração para Timeframe M15</div>
-                  <div class="revision-item">Versão 09: Refinamento de Inclinação RSI e Layout</div>
                   <div class="revision-item">Versão 01: Alteração do RSI de 14 para 9</div>
                   <div class="revision-item">Versão 00: Elaboração Inicial</div>
               </div>

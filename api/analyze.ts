@@ -1,12 +1,11 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Trava global para evitar duplicidade na mesma vela/ativo
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "RT-PRO-PRECISION-V2";
+  const versao = "RT-PRO-SIMULTANEO-V3";
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
   const ATIVOS = [
@@ -40,9 +39,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (c.length < 50) continue;
       
       const i = c.length - 1; 
-      const s = i - 2; // Analisando a vela onde a seta aparece (Vela [2])
+      const s = i - 2; // Onde a seta plota no gráfico
 
-      // --- CÁLCULOS TÉCNICOS RT_PRO ---
       const getEMA = (p: number, idx: number) => {
         const k = 2 / (p + 1);
         let ema = c[idx - 40].c; 
@@ -67,34 +65,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const mom_s = c[s].c - c[s - 10].c;
       const mom_prev = c[s - 1].c - c[s - 11].c;
 
-      // Dinapoli Stoch Simples
-      const low14 = Math.min(...c.slice(s - 13, s + 1).map(v => v.l));
-      const high14 = Math.max(...c.slice(s - 13, s + 1).map(v => v.h));
-      const fast_k = ((c[s].c - low14) / (high14 - low14)) * 100;
+      // FRACTAL - Sincronizado com o fechamento para ser simultâneo à plataforma
+      const f_topo = c[s].h > c[s-2].h && c[s].h > c[s-1].h && c[s].h > c[s+1].h && c[s].h > c[i].h;
+      const f_fundo = c[s].l < c[s-2].l && c[s].l < c[s-1].l && c[s].l < c[s+1].l && c[s].l < c[i].l;
 
-      // Fractal de 5 barras (Vela S é o centro)
-      const f_topo = c[s].h > c[s-2].h && c[s].h > c[s-1].h && c[s].h > c[s+1].h && c[s].h > c[s+2].h;
-      const f_fundo = c[s].l < c[s-2].l && c[s].l < c[s-1].l && c[s].l < c[s+1].l && c[s].l < c[s+2].l;
-
-      // --- LÓGICA DE DISPARO REVISADA ---
       let sinalStr = "";
-
-      // Prioridade ao Fractal + MACD (Motores da Seta)
-      if (f_fundo && macd_s > signal_s) {
-          // Confirmação de suporte (RSI ou Momentum ou Stoch)
-          if (rsi_s >= rsi_prev || mom_s >= mom_prev || fast_k > 40) sinalStr = "ACIMA";
-      }
-      
-      if (f_topo && macd_s < signal_s) {
-          // Confirmação de resistência (RSI ou Momentum ou Stoch)
-          if (rsi_s <= rsi_prev || mom_s <= mom_prev || fast_k < 60) sinalStr = "ABAIXO";
-      }
+      if (f_fundo && macd_s > signal_s && rsi_s > rsi_prev && mom_s > mom_prev) sinalStr = "ACIMA";
+      if (f_topo && macd_s < signal_s && rsi_s < rsi_prev && mom_s < mom_prev) sinalStr = "ABAIXO";
 
       if (sinalStr) {
         const sid = `${ativo.label}_${sinalStr}_${c[s].t}`;
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
-          const msg = `**🚨 SINAL CONFIRMADO**\n\n**ATIVO**: ${ativo.label}\n**SINAL**: ${sinalStr === "ACIMA" ? "🟢 ACIMA" : "🔴 ABAIXO"}\n**VELA**: ${new Date(c[s].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
+          const msg = `**🚨 SINAL SIMULTÂNEO RT_PRO**\n\n**ATIVO**: ${ativo.label}\n**SINAL**: ${sinalStr === "ACIMA" ? "🟢 ACIMA" : "🔴 ABAIXO"}\n**VELA**: ${new Date(c[s].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
           
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -130,7 +113,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <div class="main-card">
               <h1>RICARDO SENTINELA BOT</h1>
               <div class="status-badge"><div class="pulse-dot"></div> ATIVOS EM MONITORAMENTO REAL</div>
-              <p style="font-size: 11px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 2px; text-align: center; margin-bottom: 15px; font-weight: 700;">Análise do Mercado</p>
               <div class="asset-grid">
                   <div class="asset-card"><span>BTCUSD</span><span class="status-pill">ABERTO</span></div>
                   <div class="asset-card"><span>EURUSD</span><span class="status-pill">ABERTO</span></div>
@@ -144,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   <div><b>STATUS</b><p style="color:var(--primary)">ONLINE</p></div>
               </div>
           </div>
-          <script>setTimeout(()=>location.reload(), 15000);</script>
+          <script>setTimeout(()=>location.reload(), 10000);</script>
       </body></html>
     `);
   } catch (e) { return res.status(200).send("SERVER ONLINE"); }

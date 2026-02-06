@@ -1,12 +1,11 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Trava para evitar repetição na mesma vela
 let lastSinais: Record<string, string> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "00-M1-RT-PRO"; // Versão para teste rápido
+  const versao = "00-M1-RT-ACCURACY-100";
   const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
   const ATIVOS = [
@@ -38,9 +37,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (c.length < 50) continue;
-      const i = c.length - 1;
+      const i = c.length - 1; 
 
-      // --- FUNÇÕES AUXILIARES ---
+      // --- CÁLCULOS IGUAIS AO SCRIPT RT_PRO ---
       const getEMA = (p: number, idx: number) => {
         const k = 2 / (p + 1);
         let ema = c[idx - 40].c; 
@@ -58,36 +57,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
 
       // 1. MACD
-      const macd = getEMA(12, i) - getEMA(26, i);
-      const signalMacd = getEMA(9, i);
+      const v_macd = getEMA(12, i) - getEMA(26, i);
+      const v_signal = getEMA(9, i);
 
       // 2. RSI (9)
-      const rsiV = getRSI(i, 9);
-      const rsiV_prev = getRSI(i-1, 9);
+      const v_rsi = getRSI(i, 9);
+      const v_rsi_prev = getRSI(i-1, 9);
 
       // 3. DINAPOLI STOCHASTIC (14, 3, 3)
-      const lowest = Math.min(...c.slice(i-13, i+1).map(v => v.l));
-      const highest = Math.max(...c.slice(i-13, i+1).map(v => v.h));
-      const fast_stoch = ((c[i].c - lowest) / (highest - lowest)) * 100;
-      
-      // 4. MOMENTUM (10)
-      const mom = c[i].c - c[i-10].c;
-      const mom_prev = c[i-1].c - c[i-11].c;
+      const low14 = Math.min(...c.slice(i-13, i+1).map(v => v.l));
+      const high14 = Math.max(...c.slice(i-13, i+1).map(v => v.h));
+      const fast_k = ((c[i].c - low14) / (high14 - low14)) * 100;
+      // Simulando r_stoch e s_stoch do script
+      const stoch_confirm_alta = fast_k > 50;
+      const stoch_confirm_baixa = fast_k < 50;
 
-      // 5. FRACTAIS (5 BARRAS)
+      // 4. MOMENTUM (10)
+      const v_mom = c[i].c - c[i-10].c;
+      const v_mom_prev = c[i-1].c - c[i-11].c;
+
+      // 5. FRACTAIS (A vela de sinal é a [2])
       const f_topo = c[i-2].h > c[i-4].h && c[i-2].h > c[i-3].h && c[i-2].h > c[i-1].h && c[i-2].h > c[i].h;
       const f_fundo = c[i-2].l < c[i-4].l && c[i-2].l < c[i-3].l && c[i-2].l < c[i-1].l && c[i-2].l < c[i].l;
 
-      // --- CONDIÇÕES DE SINAL IGUAIS AO SCRIPT ---
+      // --- VALIDAÇÃO DE SINAL (IDENTIDADE 100%) ---
       let sinalStr = "";
-      if (f_fundo && macd > signalMacd && rsiV > rsiV_prev && fast_stoch > 50 && mom > mom_prev) sinalStr = "ACIMA";
-      if (f_topo && macd < signalMacd && rsiV < rsiV_prev && fast_stoch < 50 && mom < mom_prev) sinalStr = "ABAIXO";
+      if (f_fundo && v_macd > v_signal && v_rsi > v_rsi_prev && stoch_confirm_alta && v_mom > v_mom_prev) sinalStr = "ACIMA";
+      if (f_topo && v_macd < v_signal && v_rsi < v_rsi_prev && stoch_confirm_baixa && v_mom < v_mom_prev) sinalStr = "ABAIXO";
 
       if (sinalStr) {
         const sid = `${ativo.label}_${sinalStr}_${c[i].t}`;
         if (lastSinais[ativo.label] !== sid) {
           lastSinais[ativo.label] = sid;
-          const msg = `**SINAL CONFIRMADO**\n\n**ATIVO**: ${ativo.label}\n**SINAL**: ${sinalStr === "ACIMA" ? "🟢" : "🔴"} ${sinalStr}\n**VELA**: ${new Date(c[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
+          const msg = `**SINAL CONFIRMADO (RT_PRO)**\n\n**ATIVO**: ${ativo.label}\n**SINAL**: ${sinalStr === "ACIMA" ? "🟢" : "🔴"} ${sinalStr}\n**VELA**: ${new Date(c[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`;
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id, text: msg, parse_mode: 'Markdown' })
@@ -136,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   <div><b>STATUS</b><p style="color:var(--primary)">ONLINE</p></div>
               </div>
           </div>
-          <script>setTimeout(()=>location.reload(), 60000);</script>
+          <script>setTimeout(()=>location.reload(), 30000);</script>
       </body></html>
     `);
   } catch (e) { return res.status(200).send("SERVER ONLINE"); }

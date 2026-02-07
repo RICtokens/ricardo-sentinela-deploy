@@ -57,7 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const i = candles.length - 1; 
       const p = i - 1; // Vela Anterior
 
-      // --- FUNÇÕES TÉCNICAS REAPROVEITÁVEIS ---
+      // --- CÁLCULOS TÉCNICOS ---
       const getEMA = (period: number, idx: number) => {
         const k = 2 / (period + 1);
         let ema = candles[idx - 40].c; 
@@ -74,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return 100 - (100 / (1 + (g / (l || 1))));
       };
 
-      // Fibonacci no corpo da vela anterior (Melhoria 1)
+      // Fibonacci no corpo da vela anterior
       const corpoP = Math.abs(candles[p].c - candles[p].o);
       const isRedP = candles[p].c < candles[p].o;
       const fibs = {
@@ -83,27 +83,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         f382: isRedP ? candles[p].c + (corpoP * 0.382) : candles[p].o + (corpoP * 0.382)
       };
 
-      // Bollinger (Melhoria 3)
+      // Bollinger Bands para filtro de lateralidade
       const slice20 = candles.slice(-20);
       const sma20 = slice20.reduce((a, b) => a + b.c, 0) / 20;
       const variance = slice20.reduce((a, b) => a + Math.pow(b.c - sma20, 2), 0) / 20;
       const stdDev = Math.sqrt(variance);
       const bWidth = ((sma20 + 2 * stdDev) - (sma20 - 2 * stdDev)) / sma20;
 
-      // Volume (Melhoria 2)
+      // Volume para confirmação
       const avgVol = candles.slice(-21, -1).reduce((a, b) => a + b.v, 0) / 20;
       const volRatio = candles[i].v / (avgVol || 1);
 
-      // Doji (Melhoria 7)
-      const isDoji = (corpoP / (candles[p].h - candles[p].l)) < 0.30;
+      // Doji detection
+      const totalCandleP = candles[p].h - candles[p].l;
+      const isDoji = (corpoP / (totalCandleP || 1)) < 0.30;
 
-      // --- LÓGICA DE SINAL ORIGINAL ---
       const e4_i = getEMA(4, i); const e8_i = getEMA(8, i);
       const e4_p = getEMA(4, p); const e8_p = getEMA(8, p);
       const rsi_i = getRSI(i, 9);
       const isVerde = candles[i].c > candles[i].o;
       const isVermelha = candles[i].c < candles[i].o;
 
+      // --- EMISSÃO DE SINAL ORIGINAL ---
       let sinalStr = "";
       if (e4_p <= e8_p && e4_i > e8_i && rsi_i > 30 && isVerde) sinalStr = "ACIMA";
       else if (e4_p >= e8_p && e4_i < e8_i && rsi_i < 70 && isVermelha) sinalStr = "ABAIXO";
@@ -112,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const signalKey = `${ativo.label}_${sinalStr}_${candles[i].t}`;
         if (lastSinais[ativo.label] !== signalKey) {
           lastSinais[ativo.label] = signalKey;
-          lastSinais[`${ativo.label}_CTX`] = { type: sinalStr, ts: candles[i].t, sent: false }; // Contexto p/ Martingale
+          lastSinais[`${ativo.label}_CTX`] = { type: sinalStr, ts: candles[i].t, sent: false };
           
           const icon = sinalStr === "ACIMA" ? "🟢" : "🔴";
           const seta = sinalStr === "ACIMA" ? "⬆" : "⬇";
@@ -122,39 +123,82 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // --- LÓGICA DE ALERTA MARTINGALE (NOVA) ---
+      // --- LÓGICA MARTINGALE ---
       const ctx = lastSinais[`${ativo.label}_CTX`];
       if (ctx && !ctx.sent && minutoNaVela >= 3 && minutoNaVela <= 10) {
         const preco = candles[i].c;
         const trendOk = ctx.type === "ACIMA" ? e4_i > e8_i : e4_i < e8_i;
-        const volOk = volRatio > 0.8;
         const bbLimit = ativo.type === "crypto" ? 0.04 : 0.02;
-        const bbOk = bWidth > bbLimit;
         
         let mGale = false;
-        let rsiStatus = rsi_i < 30 || rsi_i > 70 ? "FORTE" : "moderado";
-
         if (ctx.type === "ACIMA") {
-          // Tocou fib50-618 e voltou acima de 382
           if (preco <= fibs.f50 && preco >= (fibs.f618 * 0.999) && rsi_i < 45) mGale = true;
         } else {
           if (preco >= fibs.f50 && preco <= (fibs.f618 * 1.001) && rsi_i > 55) mGale = true;
         }
 
-        // BLOQUEIOS (FIB 618 ultrapassado, Doji, BB lateral, Trend invertida)
-        if (mGale && trendOk && volOk && bbOk && !isDoji) {
+        if (mGale && trendOk && volRatio > 0.8 && bWidth > bbLimit && !isDoji) {
           ctx.sent = true;
           const hV = new Date(ctx.ts * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
-          const msgM = `⚠️ <b>ALERTA DE MARTINGALE</b>\n\n${ctx.type === "ACIMA" ? '🟢' : '🔴'} <b>Sinal:</b> ${ctx.type === "ACIMA" ? '⬆' : '⬇'} ${ctx.type}\n<b>Ativo:</b> ${ativo.label}\n<b>Vela:</b> ${hV}\n<b>Fibonacci:</b> Rejeitou níveis centrais\n<b>RSI:</b> ${rsi_i.toFixed(1)} (${rsiStatus})\n<b>Micro Tendência:</b> ${ctx.type}\n<b>Volume:</b> ${volRatio.toFixed(1)}x média\n<b>Bollinger:</b> ${(bWidth * 100).toFixed(2)}%\n<b>Tempo restante:</b> ${15 - minutoNaVela} min\n\n✅ <b>Condições favoráveis para martingale</b>`;
+          const rStatus = rsi_i < 30 || rsi_i > 70 ? "FORTE" : "moderado";
+          const msgM = `⚠️ <b>ALERTA DE MARTINGALE</b>\n\n${ctx.type === "ACIMA" ? '🟢' : '🔴'} <b>Sinal:</b> ${ctx.type === "ACIMA" ? '⬆' : '⬇'} ${ctx.type}\n<b>Ativo:</b> ${ativo.label}\n<b>Vela:</b> ${hV}\n<b>Fibonacci:</b> Rejeitou níveis centrais\n<b>RSI:</b> ${rsi_i.toFixed(1)} (${rStatus})\n<b>Micro Tendência:</b> ${ctx.type}\n<b>Volume:</b> ${volRatio.toFixed(1)}x média\n<b>Bollinger:</b> ${(bWidth * 100).toFixed(2)}%\n<b>Tempo restante:</b> ${15 - minutoNaVela} min\n\n✅ <b>Condições favoráveis para martingale</b>`;
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msgM, parse_mode: 'HTML' }) });
         }
       }
     }
 
+    // --- HTML RENDER ---
     const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
+    const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
+
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
-      <!DOCTYPE html> <html lang="pt-BR"> <head> <meta charset="UTF-8"><title>SENTINELA V34</title> <style> :root { --primary: #00ff88; --bg: #050505; } body { background: var(--bg); color: #fff; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; } .card { background: #111; padding: 30px; border-radius: 20px; border: 1px solid #333; text-align: center; width: 350px; } .status { color: var(--primary); font-size: 12px; margin-bottom: 20px; } .asset { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #222; } </style> </head> <body> <div class="card"> <h1>SENTINELA PRO</h1> <div class="status">● MONITORANDO...</div> <div class="asset"><span>BTCUSD</span><span>ATIVO</span></div> <div class="asset"><span>EURUSD</span><span>${statusForex}</span></div> <div class="asset"><span>GBPUSD</span><span>${statusForex}</span></div> <div class="asset"><span>USDJPY</span><span>${statusForex}</span></div> <p style="font-size: 10px; color: #555; margin-top: 20px;">VERSÃO ${versao} | JANELA 10M | FIBONACCI ATIVO</p> </div> <script>setTimeout(()=>location.reload(), 30000);</script> </body> </html>
+      <!DOCTYPE html> <html lang="pt-BR"> <head> <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+      <title>RICARDO SENTINELA PRO</title> 
+      <style> 
+        :root { --primary: #00ff88; --bg: #050505; } 
+        body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; } 
+        .main-card { width: 95%; max-width: 420px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 30px 20px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); } 
+        h1 { font-size: 24px; text-align: center; margin-bottom: 20px; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8); } 
+        .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 11px; color: var(--primary); margin-bottom: 20px; } 
+        .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; animation: pulse 1.5s infinite; } 
+        @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } } 
+        .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 12px 15px; border-radius: 12px; display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; } 
+        .status-pill { font-size: 10px; font-weight: 800; padding: 4px 10px; border-radius: 6px; } 
+        .footer { margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 11px; } 
+        .footer b { color: #888; font-size: 9px; text-transform: uppercase; } 
+        .footer p { margin: 2px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; } 
+        .revision-table { width: 100%; margin-top: 25px; border-collapse: collapse; font-size: 9px; color: rgba(255,255,255,0.7); } 
+        .revision-table th { text-align: left; color: var(--primary); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 5px; text-transform: uppercase; } 
+        .revision-table td { padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.05); } 
+      </style> </head> 
+      <body> 
+        <div class="main-card"> 
+          <h1>RICARDO SENTINELA BOT</h1> 
+          <div class="status-badge"><div class="pulse-dot"></div> EM MONITORAMENTO...</div> 
+          <div class="asset-grid"> 
+            <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div> 
+            <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> 
+            <div class="asset-card"><span>GBPUSD</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> 
+            <div class="asset-card"><span>USDJPY</span><span class="status-pill" style="background:rgba(255,68,68,0.15); color:${colorForex}">${statusForex}</span></div> 
+          </div> 
+          <div class="footer"> 
+            <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div> 
+            <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div> 
+            <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div> 
+            <div><b>STATUS</b><p style="color:var(--primary)">ATIVO</p></div> 
+          </div> 
+          <table class="revision-table"> 
+            <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
+            <tbody> 
+              <tr><td>34</td><td>07/02/26</td><td>18:25</td><td>IA Martingale + Fibonacci + Bollinger</td></tr>
+              <tr><td>33</td><td>07/02/26</td><td>15:45</td><td>Filtro de Janela 10min + Cores</td></tr> 
+              <tr><td>32</td><td>07/02/26</td><td>13:15</td><td>Formato Telegram 2.0</td></tr> 
+            </tbody> 
+          </table> 
+        </div> 
+        <script>setTimeout(()=>location.reload(), 20000);</script> 
+      </body></html>
     `);
   } catch (e) { return res.status(200).send("OK"); }
 }

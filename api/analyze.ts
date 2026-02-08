@@ -106,6 +106,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
     const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
 
+    // LOGO SVG CUSTOMIZADA (Radar + R de Ricardo)
+    const logoSvg = `<svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="45" fill="none" stroke="#00ff88" stroke-width="2" stroke-dasharray="5,3"/><circle cx="50" cy="50" r="35" fill="none" stroke="#00ff88" stroke-width="1" opacity="0.5"/><path d="M50 15 L50 35 M85 50 L65 50 M50 85 L50 65 M15 50 L35 50" stroke="#00ff88" stroke-width="2"/><text x="50" y="65" font-family="Arial" font-size="40" font-weight="900" fill="#00ff88" text-anchor="middle">R</text></svg>`;
+    const faviconBase64 = `data:image/svg+xml;base64,${Buffer.from(logoSvg).toString('base64')}`;
+
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
       <!DOCTYPE html> <html lang="pt-BR"> 
@@ -113,12 +117,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
         <title>RICARDO SENTINELA PRO</title> 
-        <link rel="icon" type="image/png" href="https://upload.wikimedia.org/wikipedia/commons/4/46/Bitcoin.svg">
+        <link rel="icon" type="image/svg+xml" href="${faviconBase64}">
         <style> 
           :root { --primary: #00ff88; --bg: #050505; } 
           body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; } 
-          .main-card { width: 95%; max-width: 420px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 30px 20px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); } 
-          h1 { font-size: 24px; text-align: center; margin-bottom: 20px; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(255,255,255,0.8); } 
+          .main-card { width: 95%; max-width: 420px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 30px 20px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); position: relative; overflow: hidden; } 
+          .logo-container { display: flex; justify-content: center; margin-bottom: 10px; }
+          h1 { font-size: 22px; text-align: center; margin-bottom: 20px; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(0,255,136,0.5); } 
           .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 11px; color: var(--primary); margin-bottom: 20px; } 
           .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; animation: pulse 1.5s infinite; } 
           @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } } 
@@ -134,6 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       </head> 
       <body> 
         <div class="main-card"> 
+          <div class="logo-container">${logoSvg}</div>
           <h1>RICARDO SENTINELA BOT</h1> 
           <div class="status-badge"><div class="pulse-dot"></div> EM MONITORAMENTO...</div> 
           <div class="asset-grid"> 
@@ -151,7 +157,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
-              <tr><td>35</td><td>08/02/26</td><td>18:47</td><td>Favicon Adicionado + Calibragem Optnex</td></tr>
+              <tr><td>35</td><td>08/02/26</td><td>18:55</td><td>Logo Exclusiva Ricardo Sentinela + Calibragem</td></tr>
               <tr><td>34</td><td>07/02/26</td><td>18:25</td><td>IA Martingale + Fibonacci + Bollinger</td></tr>
               <tr><td>33</td><td>07/02/26</td><td>15:45</td><td>Filtro de Janela 10min + Cores</td></tr> 
             </tbody> 

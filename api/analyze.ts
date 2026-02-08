@@ -38,51 +38,81 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (ativo.source === "kucoin") {
         candles = json.data.map((v: any) => ({ 
-          t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]), v: parseFloat(v[5]) 
+          t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]) 
         })).reverse();
       } else {
         const r = json.chart.result?.[0];
         const q = r.indicators.quote[0];
         candles = r.timestamp.map((t: any, idx: number) => ({
-          t, o: q.open[idx], c: q.close[idx], h: q.high[idx], l: q.low[idx], v: q.volume[idx]
+          t, o: q.open[idx], c: q.close[idx], h: q.high[idx], l: q.low[idx]
         })).filter((v: any) => v.c !== null);
       }
 
       if (candles.length < 30) continue;
-      const i = candles.length - 1; 
-      const p = i - 1;
-
-      // --- INDICADORES ---
-      const rsiVal = ((idx: number) => {
-        let g = 0, l = 0;
-        for (let j = idx - 8; j <= idx; j++) {
-          const d = candles[j].c - candles[j-1].c;
-          if (d >= 0) g += d; else l -= d;
-        }
-        return 100 - (100 / (1 + (g / (l || 1))));
-      })(i);
       
-      const fractalAlta = candles[i-2].l < Math.min(candles[i-4].l, candles[i-3].l, candles[i-1].l, candles[i].l);
-      const fractalBaixa = candles[i-2].h > Math.max(candles[i-4].h, candles[i-3].h, candles[i-1].h, candles[i].h);
-      const velaVerde = candles[i].c > candles[i].o;
-      const velaVermelha = candles[i].c < candles[i].o;
+      // CALIBRAGEM: O script da Optnex olha para trás. i=vela atual em formação.
+      // Usamos i-1 para verificar se o sinal confirmou no fechamento da vela anterior.
+      const i = candles.length - 1; 
 
-      // --- LOGICA DE SINAL (FRACTAL + RSI) ---
+      const calcularRSI = (idx: number) => {
+        let gains = 0, losses = 0;
+        for (let j = idx - 8; j <= idx; j++) {
+          const diff = candles[j].c - candles[j-1].c;
+          if (diff >= 0) gains += diff; else losses -= diff;
+        }
+        const rs = gains / (losses || 1);
+        return 100 - (100 / (1 + rs));
+      };
+
+      const rsi_val = calcularRSI(i);
+      const rsi_ant = calcularRSI(i - 1);
+
+      // Lógica Fractal 5 períodos (conforme script RT_ROBO)
+      const fractal_alta = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
+      const fractal_baixa = candles[i-2].h > candles[i-4].h && candles[i-2].h > candles[i-3].h && candles[i-2].h > candles[i-1].h && candles[i-2].h > candles[i].h;
+
+      const vela_verde = candles[i].c > candles[i].o;
+      const vela_vermelha = candles[i].c < candles[i].o;
+      const rsi_subindo = rsi_val > rsi_ant;
+      const rsi_caindo = rsi_val < rsi_ant;
+
+      const rsi_call_valido = (rsi_val >= 55 || rsi_val >= 30) && rsi_subindo;
+      const rsi_put_valido = (rsi_val <= 45 || rsi_val <= 70) && rsi_caindo;
+
       let sinalStr = "";
-      if (fractalAlta && (rsiVal >= 55 || rsiVal >= 30) && velaVerde) sinalStr = "ACIMA";
-      if (fractalBaixa && (rsiVal <= 45 || rsiVal <= 70) && velaVermelha) sinalStr = "ABAIXO";
+      let seta = "";
+      if (fractal_alta && rsi_call_valido && vela_verde) { sinalStr = "ACIMA"; seta = "↑"; }
+      if (fractal_baixa && rsi_put_valido && vela_vermelha) { sinalStr = "ABAIXO"; seta = "↓"; }
 
       if (sinalStr && dentroDaJanela) {
         const opId = `${ativo.label}_${candles[i].t}`;
         if (!contextoOperacoes[opId]) {
-          contextoOperacoes[opId] = { tipo: sinalStr, mtgOk: false, ts: candles[i].t };
-          
-          // HORA FORMATADA DA VELA
           const horaVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
           
-          const msg = `${sinalStr === "ACIMA" ? '🟢' : '🔴'} <b>SINAL EMITIDO!</b>\n\n<b>ATIVO</b>: ${ativo.label}\n<b>SINAL</b>: ${sinalStr}\n<b>VELA</b>: ${horaVela}\n<b>RSI</b>: ${rsiVal.toFixed(1)}`;
-          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' }) });
+          contextoOperacoes[opId] = { tipo: sinalStr, ts: candles[i].t, enviado: true };
+
+          const msg = `<b>SINAL EMITIDO!</b>\n\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${seta} ${sinalStr}\n<b>VELA:</b> ${horaVela}`;
+          
+          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' })
+          });
         }
+      }
+
+      // --- 1ª DÚVIDA: LÓGICA DE ALERTA DE MARTINGALE ---
+      // Se houve sinal na vela anterior e a vela atual está contra o sinal, emite alerta de Martingale
+      const idAnterior = `${ativo.label}_${candles[i-1].t}`;
+      if (contextoOperacoes[idAnterior] && !contextoOperacoes[idAnterior].mtgAlerta) {
+          const operacao = contextoOperacoes[idAnterior];
+          const lossDetectado = (operacao.tipo === "ACIMA" && vela_vermelha) || (operacao.tipo === "ABAIXO" && vela_verde);
+          
+          if (lossDetectado && minutoNaVela >= 12) { // Alerta nos últimos minutos da vela de perda
+              const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE!</b>\n\n<b>ATIVO:</b> ${ativo.label}\n<b>PROX. VELA:</b> ENTRADA M1`;
+              await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msgMtg, parse_mode: 'HTML' }) });
+              contextoOperacoes[idAnterior].mtgAlerta = true;
+          }
       }
     }
 
@@ -129,7 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
-              <tr><td>35</td><td>08/02/26</td><td>09:30</td><td>Gatilho Fractal 5 + Alerta com Hora da Vela</td></tr>
+              <tr><td>35</td><td>08/02/26</td><td>18:30</td><td>Calibragem Optnex + Alerta Martingale + Formato Seta</td></tr>
               <tr><td>34</td><td>07/02/26</td><td>18:25</td><td>IA Martingale + Fibonacci + Bollinger</td></tr>
               <tr><td>33</td><td>07/02/26</td><td>15:45</td><td>Filtro de Janela 10min + Cores</td></tr> 
             </tbody> 

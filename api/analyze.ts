@@ -1,6 +1,5 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Persistência em memória para monitorar Martingale após o sinal original
 let contextoOperacoes: Record<string, any> = {};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -50,8 +49,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (candles.length < 30) continue;
-      const i = candles.length - 1; // Vela Atual
-      const p = i - 1;             // Vela Anterior
+      const i = candles.length - 1; 
+      const p = i - 1;
 
       // --- INDICADORES ---
       const rsiVal = ((idx: number) => {
@@ -63,7 +62,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return 100 - (100 / (1 + (g / (l || 1))));
       })(i);
       
-      const rsiAnt = rsiVal; // Simplificado para exemplo, ideal calcular i-1
       const fractalAlta = candles[i-2].l < Math.min(candles[i-4].l, candles[i-3].l, candles[i-1].l, candles[i].l);
       const fractalBaixa = candles[i-2].h > Math.max(candles[i-4].h, candles[i-3].h, candles[i-1].h, candles[i].h);
       const velaVerde = candles[i].c > candles[i].o;
@@ -79,16 +77,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!contextoOperacoes[opId]) {
           contextoOperacoes[opId] = { tipo: sinalStr, mtgOk: false, ts: candles[i].t };
           
-          const msg = `${sinalStr === "ACIMA" ? '🟢' : '🔴'} <b>SINAL EMITIDO!</b>\n<b>ATIVO</b>: ${ativo.label}\n<b>SINAL</b>: ${sinalStr}\n<b>RSI</b>: ${rsiVal.toFixed(1)}`;
+          // HORA FORMATADA DA VELA
+          const horaVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+          
+          const msg = `${sinalStr === "ACIMA" ? '🟢' : '🔴'} <b>SINAL EMITIDO!</b>\n\n<b>ATIVO</b>: ${ativo.label}\n<b>SINAL</b>: ${sinalStr}\n<b>VELA</b>: ${horaVela}\n<b>RSI</b>: ${rsiVal.toFixed(1)}`;
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' }) });
         }
-      }
-
-      // --- LÓGICA DE MARTINGALE (FIBO/BOLLINGER/VOLUME) ---
-      const ctx = contextoOperacoes[`${ativo.label}_${candles[i].t}`];
-      if (ctx && !ctx.mtgOk && minutoNaVela >= 3 && minutoNaVela <= 10) {
-          // Aqui entrariam os cálculos de Fibo e Bollinger detalhados na sua especificação
-          // Se condições favoráveis: ctx.mtgOk = true e envia msgMartingale
       }
     }
 
@@ -135,8 +129,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
-              <tr><td>35</td><td>08/02/26</td><td>08:55</td><td>Gatilho Fractal 5 + RSI 9 + Monitoramento Martingale</td></tr>
-              <tr><td>34</td><td>07/02/26</td><td>18:25</td><td>IA Martingale + Fibonacci + Bollinger (Base)</td></tr>
+              <tr><td>35</td><td>08/02/26</td><td>09:30</td><td>Gatilho Fractal 5 + Alerta com Hora da Vela</td></tr>
+              <tr><td>34</td><td>07/02/26</td><td>18:25</td><td>IA Martingale + Fibonacci + Bollinger</td></tr>
               <tr><td>33</td><td>07/02/26</td><td>15:45</td><td>Filtro de Janela 10min + Cores</td></tr> 
             </tbody> 
           </table> 

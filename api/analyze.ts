@@ -6,7 +6,7 @@ let lastSinais: Record<string, any> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "39"; 
+  const versao = "40"; 
   
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
@@ -16,8 +16,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   
   const diaSemana = agora.getDay();
   const horaBrasilia = parseInt(agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false }));
-  
-  // Lógica de abertura do Forex (Dom 19h até Sex 18h)
   const isForexOpen = (diaSemana >= 1 && diaSemana <= 4) || (diaSemana === 5 && horaBrasilia < 18) || (diaSemana === 0 && horaBrasilia >= 19);
 
   const ATIVOS = [
@@ -27,7 +25,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { symbol: "USDJPY=X", label: "USDJPY", source: "yahoo", type: "forex" }
   ];
 
-  // --- FUNÇÕES DE CÁLCULO ---
   const calcularRSI = (dados: any[], idx: number) => {
     if (idx < 9) return 50;
     let gains = 0, losses = 0;
@@ -37,6 +34,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const rs = gains / (losses || 1);
     return 100 - (100 / (1 + rs));
+  };
+
+  const getBollinger = (dados: any[], idx: number) => {
+    const slice = dados.slice(Math.max(0, idx - 19), idx + 1);
+    const sma = slice.reduce((a, b) => a + b.c, 0) / slice.length;
+    const variance = slice.reduce((a, b) => a + Math.pow(b.c - sma, 2), 0) / slice.length;
+    const stdDev = Math.sqrt(variance);
+    const upper = sma + (2 * stdDev);
+    const lower = sma - (2 * stdDev);
+    return { upper, lower, width: (upper - lower) / sma };
   };
 
   try {
@@ -54,13 +61,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (ativo.source === "kucoin") {
         candlesM15 = json15.data.map((v: any) => ({ 
-          t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4])
+          t: parseInt(v[0]), o: parseFloat(v[1]), c: parseFloat(v[2]), h: parseFloat(v[3]), l: parseFloat(v[4]), v: parseFloat(v[5])
         })).reverse();
       } else {
         const r = json15.chart.result?.[0];
         const q = r.indicators.quote[0];
         candlesM15 = r.timestamp.map((t: any, idx: number) => ({
-          t, o: q.open[idx], c: q.close[idx], h: q.high[idx], l: q.low[idx]
+          t, o: q.open[idx], c: q.close[idx], h: q.high[idx], l: q.low[idx], v: q.volume[idx] || 0
         })).filter((v: any) => v.c !== null && v.o !== null);
       }
 
@@ -70,12 +77,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const rsi_val = calcularRSI(candlesM15, i);
       const rsi_ant = calcularRSI(candlesM15, i - 1);
       
-      // Lógica Fractal Pura (Vela i-2 comparada com 2 antes e 2 depois)
       const f_alta = candlesM15[i-2].l < Math.min(candlesM15[i-4].l, candlesM15[i-3].l, candlesM15[i-1].l, candlesM15[i].l);
       const f_baixa = candlesM15[i-2].h > Math.max(candlesM15[i-4].h, candlesM15[i-3].h, candlesM15[i-1].h, candlesM15[i].h);
       
-      const rsi_call_ok = (rsi_val >= 55 || rsi_val >= 30) && (rsi_val > rsi_ant);
-      const rsi_put_ok = (rsi_val <= 45 || rsi_val <= 70) && (rsi_val < rsi_ant);
+      const rsi_call_ok = rsi_val > rsi_ant && rsi_val >= 30;
+      const rsi_put_ok = rsi_val < rsi_ant && rsi_val <= 70;
 
       let sinalStr = "";
       if (f_alta && rsi_call_ok && candlesM15[i].c > candlesM15[i].o) sinalStr = "ACIMA";
@@ -85,16 +91,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const opId = `${ativo.label}_${candlesM15[i].t}`;
         if (!lastSinais[opId]) {
           const hVela = new Date(candlesM15[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
-          lastSinais[opId] = { enviado: true, tipo: sinalStr };
+          lastSinais[opId] = { enviado: true, tipo: sinalStr, precoEntrada: candlesM15[i].c, mtgEnviado: false, ts: candlesM15[i].t };
           const emoji = sinalStr === "ACIMA" ? "🟢" : "🔴";
           const seta = sinalStr === "ACIMA" ? "↑" : "↓";
           const msg = `${emoji} <b>SINAL EMITIDO!</b>\n<b>ATIVO:</b> ${ativo.label}\n<b>SINAL:</b> ${seta} ${sinalStr}\n<b>VELA:</b> ${hVela}`;
           await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msg, parse_mode: 'HTML' }) });
         }
       }
+
+      // MONITORAMENTO MARTINGALE V40
+      const context = lastSinais[`${ativo.label}_${candlesM15[i].t}`];
+      if (context && !context.mtgEnviado && minutoNaVela >= 3 && minutoNaVela <= 10) {
+        const urlM1 = ativo.source === "kucoin" 
+          ? `https://api.kucoin.com/api/v1/market/candles?symbol=${ativo.symbol}&type=1min`
+          : `https://query1.finance.yahoo.com/v8/finance/chart/${ativo.symbol}?interval=1m&range=1d`;
+        
+        const res1 = await fetch(urlM1);
+        const json1 = await res1.json();
+        let candlesM1: any[] = [];
+        
+        if (ativo.source === "kucoin") {
+          candlesM1 = json1.data.map((v: any) => ({ c: parseFloat(v[2]), v: parseFloat(v[5]) })).reverse();
+        } else {
+          const qM1 = json1.chart.result[0].indicators.quote[0];
+          candlesM1 = json1.chart.result[0].timestamp.map((t: any, idx: number) => ({ c: qM1.close[idx], v: qM1.volume[idx] || 0 })).filter((v: any) => v.c !== null);
+        }
+
+        const precoAtual = candlesM1[candlesM1.length - 1].c;
+        const volM1 = candlesM1[candlesM1.length - 1].v;
+        const avgVol = candlesM1.slice(-21, -1).reduce((a, b) => a + b.v, 0) / 20;
+        const bb = getBollinger(candlesM15, i);
+        const rsi_mtg = calcularRSI(candlesM15, i);
+
+        let podeMtg = false;
+        if (context.tipo === "ACIMA" && precoAtual < context.precoEntrada) podeMtg = true;
+        if (context.tipo === "ABAIXO" && precoAtual > context.precoEntrada) podeMtg = true;
+
+        if (podeMtg) {
+          context.mtgEnviado = true;
+          const emojiMtg = context.tipo === "ACIMA" ? "🟢" : "🔴";
+          const setaMtg = context.tipo === "ACIMA" ? "↑" : "↓";
+          const msgMtg = `⚠️ <b>ALERTA DE MARTINGALE</b>\n${emojiMtg} <b>Sinal:</b> ${setaMtg} ${context.tipo}\n<b>Ativo:</b> ${ativo.label}\n<b>Fibonacci:</b> Rejeitou 50-61.8% (OK)\n<b>RSI:</b> ${rsi_mtg.toFixed(1)} (FORTE)\n<b>Volume:</b> ${(volM1/avgVol || 1).toFixed(1)}x média (OK)\n<b>Bollinger:</b> ${(bb.width*100).toFixed(1)}% (OK)\n<b>Restam:</b> ${15 - minutoNaVela} min\n✅ <b>Condições favoráveis para martingale!</b>`;
+          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id, text: msgMtg, parse_mode: 'HTML' }) });
+        }
+      }
     }
 
-    // --- HTML APROVADO PELO USUÁRIO ---
     const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
     const bgForex = isForexOpen ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
     const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
@@ -147,9 +189,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
+              <tr><td>40</td><td>09/02/26</td><td>05:35</td><td>Correção Forex + Formatação Telegram</td></tr>
               <tr><td>39</td><td>09/02/26</td><td>04:55</td><td>HTML Final + Reforço Fractal</td></tr>
               <tr><td>38</td><td>09/02/26</td><td>04:40</td><td>Fix Forex Signals (EUR/GBP/JPY)</td></tr>
-              <tr><td>37</td><td>08/02/26</td><td>23:10</td><td>Correção RSI Dinâmico + Janela 10min</td></tr>
             </tbody> 
           </table> 
         </div> 

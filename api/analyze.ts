@@ -6,7 +6,7 @@ let lastSinais: Record<string, any> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "41"; 
+  const versao = "42"; 
   
   const agora = new Date();
   const dataHora = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
@@ -72,8 +72,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (candlesM15.length < 30) continue;
-      // Para Forex no Yahoo, garantimos que pegamos a última vela completa disponível
-      const i = candlesM15.length - 1; 
+      
+      // i é a vela que acabou de fechar. Se estivermos nos primeiros minutos da nova vela,
+      // i deve ser a vela anterior à atual para garantir o sinal fechado.
+      const i = (minutoNaVela < 2) ? candlesM15.length - 2 : candlesM15.length - 1; 
 
       const rsi_val = calcularRSI(candlesM15, i);
       const rsi_ant = calcularRSI(candlesM15, i - 1);
@@ -81,9 +83,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const f_alta = candlesM15[i-2].l < Math.min(candlesM15[i-4].l, candlesM15[i-3].l, candlesM15[i-1].l, candlesM15[i].l);
       const f_baixa = candlesM15[i-2].h > Math.max(candlesM15[i-4].h, candlesM15[i-3].h, candlesM15[i-1].h, candlesM15[i].h);
       
-      // Ajuste de sensibilidade para Forex (filtros mais amplos para pegar os sinais citados)
-      const rsi_call_ok = (rsi_val > rsi_ant);
-      const rsi_put_ok = (rsi_val < rsi_ant);
+      const rsi_call_ok = rsi_val >= rsi_ant;
+      const rsi_put_ok = rsi_val <= rsi_ant;
 
       let sinalStr = "";
       if (f_alta && rsi_call_ok && candlesM15[i].c > candlesM15[i].o) sinalStr = "ACIMA";
@@ -101,7 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // MONITORAMENTO MARTINGALE V41 - COM TRAVA DE TEMPO (Mínimo 3 minutos após sinal)
+      // MONITORAMENTO MARTINGALE V42
       const context = lastSinais[`${ativo.label}_${candlesM15[i].t}`];
       const tempoDesdeSinal = context ? (Date.now() - context.tsEnvio) / 60000 : 0;
 
@@ -141,6 +142,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // --- HTML ORIGINAL MANTIDO ---
     const statusForex = isForexOpen ? "ABERTO" : "FECHADO";
     const bgForex = isForexOpen ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
     const colorForex = isForexOpen ? "var(--primary)" : "#ff4444";
@@ -193,9 +195,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <table class="revision-table"> 
             <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
             <tbody> 
+              <tr><td>42</td><td>09/02/26</td><td>12:20</td><td>Correção Sincronia Forex (Yahoo)</td></tr>
               <tr><td>41</td><td>09/02/26</td><td>06:35</td><td>Trava de Martingale + Filtro Forex Yahoo</td></tr>
               <tr><td>40</td><td>09/02/26</td><td>05:35</td><td>Correção Forex + Formatação Telegram</td></tr>
-              <tr><td>39</td><td>09/02/26</td><td>04:55</td><td>HTML Final + Reforço Fractal</td></tr>
             </tbody> 
           </table> 
         </div> 

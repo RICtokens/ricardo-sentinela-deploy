@@ -6,7 +6,7 @@ let lastSinais: Record<string, boolean> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "51"; 
+  const versao = "52"; 
   
   const agora = new Date();
   const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false };
@@ -70,44 +70,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (candles.length < 10) continue;
       
-      const i = candles.length - 1; // Vela atual (em formação)
+      const i = candles.length - 1; // Vela i (em formação)
       const minutoNaVela = agora.getMinutes() % 15;
 
       // --- LÓGICA SYNC RT_ROBO_V.01 (FRACTAL 5 PERÍODOS) ---
-      // Na Optnex, o fractal aparece na vela low[2]. 
-      // Para o robô disparar no fechamento da confirmação:
-      // Ponto Central: i-3 | Posteriores (Confirmação): i-2 e i-1
+      // Para alinhar com a Optnex:
+      // fractal_alta = low[2] < low[4] and low[2] < low[3] and low[2] < low[1] and low[2] < low[0]
+      // No robô:
+      // low[2] da Optnex é candles[i-2]
+      // low[0] da Optnex é candles[i]
       
-      const rsi_val = calcularRSI(candles, i - 1);
-      const rsi_ant = calcularRSI(candles, i - 2);
+      const rsi_val = calcularRSI(candles, i); // RSI da vela atual para sinal em tempo real
+      const rsi_ant = calcularRSI(candles, i - 1);
       const rsi_subindo = rsi_val > rsi_ant;
       const rsi_caindo = rsi_val < rsi_ant;
 
-      // Fractal de Alta (Gatilho para ACIMA)
-      const f_alta = candles[i-3].l < candles[i-5].l && 
-                     candles[i-3].l < candles[i-4].l && 
-                     candles[i-3].l < candles[i-2].l && 
-                     candles[i-3].l < candles[i-1].l;
+      // Fractal de Alta (Gatilho para ACIMA) - Baseado no script Optnex low[2]
+      const f_alta = candles[i-2].l < candles[i-4].l && 
+                     candles[i-2].l < candles[i-3].l && 
+                     candles[i-2].l < candles[i-1].l && 
+                     candles[i-2].l < candles[i].l;
 
-      // Fractal de Baixa (Gatilho para ABAIXO)
-      const f_baixa = candles[i-3].h > candles[i-5].h && 
-                      candles[i-3].h > candles[i-4].h && 
-                      candles[i-3].h > candles[i-2].h && 
-                      candles[i-3].h > candles[i-1].h;
+      // Fractal de Baixa (Gatilho para ABAIXO) - Baseado no script Optnex high[2]
+      const f_baixa = candles[i-2].h > candles[i-4].h && 
+                      candles[i-2].h > candles[i-3].h && 
+                      candles[i-2].h > candles[i-1].h && 
+                      candles[i-2].h > candles[i].h;
 
       const rsi_call_ok = (rsi_val >= 55 || rsi_val >= 30) && rsi_subindo;
       const rsi_put_ok = (rsi_val <= 45 || rsi_val <= 70) && rsi_caindo;
 
       let sinalStr = "";
-      // Cor da vela i-1 (fechada) deve confirmar a direção
-      if (f_alta && rsi_call_ok && candles[i-1].c > candles[i-1].o) sinalStr = "ACIMA";
-      if (f_baixa && rsi_put_ok && candles[i-1].c < candles[i-1].o) sinalStr = "ABAIXO";
+      // Validação da vela atual e RSI conforme script Optnex
+      if (f_alta && rsi_call_ok && candles[i].c > candles[i].o) sinalStr = "ACIMA";
+      if (f_baixa && rsi_put_ok && candles[i].c < candles[i].o) sinalStr = "ABAIXO";
 
-      const opId = `${ativo.label}_${candles[i].t}`;
+      // ID único baseado na vela onde o fractal aconteceu (i-2) para sincronia
+      const opId = `${ativo.label}_${candles[i-2].t}`;
 
-      // Envio apenas nos primeiros 2 minutos da vela de execução
-      if (sinalStr && minutoNaVela <= 2 && !lastSinais[opId]) {
-        const hVela = new Date(candles[i].t * 1000).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+      if (sinalStr && !lastSinais[opId]) {
+        // A hora da vela no telegram deve ser a hora da vela onde o Fractal foi identificado (i-2)
+        const dataVela = new Date(candles[i-2].t * 1000);
+        const hVela = dataVela.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
         
         lastSinais[opId] = true;
         
@@ -132,58 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
-      <!DOCTYPE html> <html lang="pt-BR"> 
-      <head> 
-        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"> 
-        <title>RICARDO SENTINELA PRO</title> 
-        <link rel="icon" type="image/svg+xml" href="${faviconBase64}">
-        <style> 
-          :root { --primary: #00ff88; --bg: #050505; } 
-          body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; } 
-          .main-card { width: 95%; max-width: 420px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 30px 20px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); position: relative; overflow: hidden; } 
-          .logo-container { display: flex; justify-content: center; margin-bottom: 10px; }
-          h1 { font-size: 22px; text-align: center; margin-bottom: 20px; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(0,255,136,0.5); } 
-          .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 11px; color: var(--primary); margin-bottom: 20px; } 
-          .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; animation: pulse 1.5s infinite; } 
-          @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } } 
-          .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 12px 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 14px; } 
-          .status-pill { font-size: 10px; font-weight: 800; padding: 6px 12px; border-radius: 6px; text-align: center; min-width: 60px; } 
-          .footer { margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: center; } 
-          .footer b { color: #888; font-size: 9px; text-transform: uppercase; display: block; margin-bottom: 4px; } 
-          .footer p { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; } 
-          .revision-table { width: 100%; margin-top: 25px; border-collapse: collapse; font-size: 9px; color: rgba(255,255,255,0.7); } 
-          .revision-table th { text-align: left; color: var(--primary); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 5px; text-transform: uppercase; } 
-          .revision-table td { padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.05); } 
-        </style> 
-      </head> 
-      <body> 
-        <div class="main-card"> 
-          <div class="logo-container">${logoSvg}</div>
-          <h1>RICARDO SENTINELA BOT</h1> 
-          <div class="status-badge"><div class="pulse-dot"></div> EM MONITORAMENTO...</div> 
-          <div class="asset-grid"> 
-            <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div> 
-            <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:${bgEur}; color:${colorEur}">${statusEur}</span></div> 
-          </div> 
-          <div class="footer"> 
-            <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div> 
-            <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div> 
-            <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div> 
-            <div><b>STATUS</b><p style="color:var(--primary); font-weight:bold;">ATIVO</p></div> 
-          </div> 
-          <table class="revision-table"> 
-            <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> 
-            <tbody> 
-              <tr><td>51</td><td>12/02/26</td><td>20:52</td><td>Removido GBP e JPY + Refinamento Fractal</td></tr>
-              <tr><td>50</td><td>12/02/26</td><td>20:30</td><td>Sync Fractal i-2 + Histórico 5v</td></tr>
-              <tr><td>49</td><td>12/02/26</td><td>20:05</td><td>Remoção Martingale + Sync Fractal Optnex</td></tr>
-              <tr><td>48</td><td>12/02/26</td><td>19:55</td><td>Fix Envio BTCUSD + RT_ROBO_V.01 Sync</td></tr>
-              <tr><td>37</td><td>08/02/26</td><td>23:10</td><td>Correção RSI Dinâmico + Janela 10min</td></tr>
-            </tbody> 
-          </table> 
-        </div> 
-        <script>setTimeout(()=>location.reload(), 20000);</script> 
-      </body></html>
+      <!DOCTYPE html> <html lang="pt-BR"> <head> <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>RICARDO SENTINELA PRO</title> <link rel="icon" type="image/svg+xml" href="${faviconBase64}"> <style> :root { --primary: #00ff88; --bg: #050505; } body { background-color: var(--bg); background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.02) 1px, transparent 0); background-size: 32px 32px; color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; } .main-card { width: 95%; max-width: 420px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 30px 20px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); position: relative; overflow: hidden; } .logo-container { display: flex; justify-content: center; margin-bottom: 10px; } h1 { font-size: 22px; text-align: center; margin-bottom: 20px; font-weight: 900; text-transform: uppercase; color: #FFFFFF; text-shadow: 0 0 10px rgba(0,255,136,0.5); } .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 10px; border-radius: 14px; font-size: 11px; color: var(--primary); margin-bottom: 20px; } .pulse-dot { height: 8px; width: 8px; background-color: var(--primary); border-radius: 50%; animation: pulse 1.5s infinite; } @keyframes pulse { 0%, 100% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.5; } } .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 12px 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 14px; } .status-pill { font-size: 10px; font-weight: 800; padding: 6px 12px; border-radius: 6px; text-align: center; min-width: 60px; } .footer { margin-top: 25px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: center; } .footer b { color: #888; font-size: 9px; text-transform: uppercase; display: block; margin-bottom: 4px; } .footer p { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; } .revision-table { width: 100%; margin-top: 25px; border-collapse: collapse; font-size: 9px; color: rgba(255,255,255,0.7); } .revision-table th { text-align: left; color: var(--primary); border-bottom: 1px solid rgba(255,255,255,0.1); padding: 5px; text-transform: uppercase; } .revision-table td { padding: 5px; border-bottom: 1px solid rgba(255,255,255,0.05); } </style> </head> <body> <div class="main-card"> <div class="logo-container">${logoSvg}</div> <h1>RICARDO SENTINELA BOT</h1> <div class="status-badge"><div class="pulse-dot"></div> EM MONITORAMENTO...</div> <div class="asset-grid"> <div class="asset-card"><span>BTCUSD</span><span class="status-pill" style="background:rgba(0,255,136,0.15); color:var(--primary)">ABERTO</span></div> <div class="asset-card"><span>EURUSD</span><span class="status-pill" style="background:${bgEur}; color:${colorEur}">${statusEur}</span></div> </div> <div class="footer"> <div><b>DATA</b><p>${dataHora.split(',')[0]}</p></div> <div><b>HORA</b><p>${dataHora.split(',')[1]}</p></div> <div><b>VERSÃO</b><p style="color:var(--primary); font-weight:bold;">${versao}</p></div> <div><b>STATUS</b><p style="color:var(--primary); font-weight:bold;">ATIVO</p></div> </div> <table class="revision-table"> <thead> <tr><th>Nº</th><th>DATA</th><th>HORA</th><th>MOTIVO</th></tr> </thead> <tbody> <tr><td>52</td><td>12/02/26</td><td>21:50</td><td>Correção Sincronia Fractal M15 (Sync Optnex)</td></tr> <tr><td>51</td><td>12/02/26</td><td>20:52</td><td>Removido GBP e JPY + Refinamento Fractal</td></tr> <tr><td>50</td><td>12/02/26</td><td>20:30</td><td>Sync Fractal i-2 + Histórico 5v</td></tr> <tr><td>49</td><td>12/02/26</td><td>20:05</td><td>Remoção Martingale + Sync Fractal Optnex</td></tr> <tr><td>48</td><td>12/02/26</td><td>19:55</td><td>Fix Envio BTCUSD + RT_ROBO_V.01 Sync</td></tr> </tbody> </table> </div> <script>setTimeout(()=>location.reload(), 20000);</script> </body></html>
     `);
   } catch (e) { return res.status(200).send("OK"); }
 }

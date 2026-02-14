@@ -26,21 +26,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return false;
   };
 
-  // Logica de Backend mantida conforme v79 (Tripla Redundância)
-  // [Cálculos de RSI, EMA e Fetch de APIs omitidos aqui para brevidade, mas preservados no código real]
-
-  const statusEur = getStatus("EURUSD") ? "ABERTO" : "FECHADO";
-  const bgEur = statusEur === "ABERTO" ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
-  const colorEur = statusEur === "ABERTO" ? "#00ff88" : "#ff4444";
-
-  // SVG do Logo com Animação Sentinela (Marcação 2)
+  // SVG do Logo com Animação de Radar (Marcação 2)
   const logoSvg = `
-    <svg width="80" height="80" viewBox="0 0 100 100" class="sentinel-logo">
-      <circle cx="50" cy="50" r="45" fill="none" stroke="#00ff88" stroke-width="1" stroke-dasharray="5,5" class="rotate"/>
+    <svg width="80" height="80" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="45" fill="none" stroke="#00ff88" stroke-width="1" stroke-dasharray="5,5">
+        <animateTransform attributeName="transform" type="rotate" from="0 50 50" to="360 50 50" dur="10s" repeatCount="indefinite" />
+      </circle>
       <circle cx="50" cy="50" r="38" fill="none" stroke="#00ff88" stroke-width="2" opacity="0.3"/>
       <path d="M50 15 L50 30 M85 50 L70 50 M50 85 L50 70 M15 50 L30 50" stroke="#00ff88" stroke-width="2"/>
       <text x="50" y="62" font-family="Arial" font-size="35" font-weight="900" fill="#00ff88" text-anchor="middle">R</text>
     </svg>`;
+
+  const statusEur = getStatus("EURUSD") ? "ABERTO" : "FECHADO";
+  const bgEur = statusEur === "ABERTO" ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
+  const colorEur = statusEur === "ABERTO" ? "#00ff88" : "#ff4444";
 
   res.setHeader('Content-Type', 'text/html');
   return res.status(200).send(`
@@ -56,11 +55,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         body { background-color: var(--bg); color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
         .main-card { width: 95%; max-width: 420px; background: var(--card); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 32px; padding: 35px 25px; box-shadow: 0 30px 60px rgba(0,0,0,0.7); }
         .logo-container { display: flex; justify-content: center; margin-bottom: 15px; }
-        .rotate { animation: spin 10s linear infinite; transform-origin: center; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         h1 { font-size: 20px; text-align: center; margin-bottom: 25px; letter-spacing: 2px; font-weight: 800; color: #fff; }
-        /* Badge Estilizado (Marcação 3) */
-        .status-badge { width: 100%; background: linear-gradient(90deg, rgba(0,255,136,0.05) 0%, rgba(0,255,136,0.15) 50%, rgba(0,255,136,0.05) 100%); border: 1px solid rgba(0,255,136,0.2); padding: 12px; border-radius: 12px; font-size: 11px; color: var(--primary); display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 25px; text-transform: uppercase; letter-spacing: 1px; }
+        /* Badge Ajustado (Marcação 3) */
+        .status-badge { width: 100%; background: linear-gradient(90deg, rgba(0,255,136,0.02) 0%, rgba(0,255,136,0.1) 50%, rgba(0,255,136,0.02) 100%); border: 1px solid rgba(0,255,136,0.2); padding: 12px; border-radius: 12px; font-size: 11px; color: var(--primary); display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 25px; text-transform: uppercase; }
         .pulse { width: 8px; height: 8px; background: var(--primary); border-radius: 50%; box-shadow: 0 0 10px var(--primary); animation: pulse-anim 2s infinite; }
         @keyframes pulse-anim { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
         .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 15px 20px; border-radius: 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }

@@ -5,7 +5,7 @@ let lastSinais: Record<string, boolean> = {};
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = "8223429851:AAFl_QtX_Ot9KOiuw1VUEEDBC_32VKLdRkA";
   const chat_id = "7625668696";
-  const versao = "77"; 
+  const versao = "78"; 
   
   const agora = new Date();
   const timeZone = 'America/Sao_Paulo';
@@ -95,17 +95,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const rsi_ant = calcularRSI(candles, i - 1);
         const ema_20 = calcularEMA(candles.slice(0, i + 1), 20);
         
-        // Lógica Fractal RT_ROBO_V.02 
+        // Lógica Fractal RT_ROBO_V.02 (i-2 comparada a i-4, i-3, i-1 e i)
         const f_alta = candles[i-2].l < candles[i-4].l && candles[i-2].l < candles[i-3].l && candles[i-2].l < candles[i-1].l && candles[i-2].l < candles[i].l;
         const f_baixa = candles[i-2].h > candles[i-4].h && candles[i-2].h > candles[i-3].h && candles[i-2].h > candles[i-1].h && candles[i-2].h > candles[i].h;
         
-        const rsi_subindo = rsi_val > rsi_ant;
-        const rsi_caindo = rsi_val < rsi_ant;
-
         let sinalStr = "";
-        // Alinhamento total com RT_ROBO_V.02 
-        if (f_alta && (rsi_val >= 55 || rsi_val >= 30) && rsi_subindo && candles[i].c > ema_20 && candles[i].c > candles[i].o) sinalStr = "ACIMA";
-        if (f_baixa && (rsi_val <= 45 || rsi_val <= 70) && rsi_caindo && candles[i].c < ema_20 && candles[i].c < candles[i].o) sinalStr = "ABAIXO";
+        // Alinhamento com Lógica V.02 e Filtro de Tendência EMA 20
+        if (f_alta && (rsi_val >= 55 || rsi_val >= 30) && rsi_val > rsi_ant && candles[i].c > ema_20 && candles[i].c > candles[i].o) sinalStr = "ACIMA";
+        if (f_baixa && (rsi_val <= 45 || rsi_val <= 70) && rsi_val < rsi_ant && candles[i].c < ema_20 && candles[i].c < candles[i].o) sinalStr = "ABAIXO";
 
         if (sinalStr) {
           const opId = `${ativo.label}_${candles[i].t}_${sinalStr}`;
@@ -127,22 +124,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const statusEur = getStatus("EURUSD") ? "ABERTO" : "FECHADO";
-    const logoSvg = `<svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="45" fill="none" stroke="#00ff88" stroke-width="2" stroke-dasharray="5,3"/><circle cx="50" cy="50" r="35" fill="none" stroke="#00ff88" stroke-width="1" opacity="0.5"/><path d="M50 15 L50 35 M85 50 L65 50 M50 85 L50 65 M15 50 L35 50" stroke="#00ff88" stroke-width="2"/><text x="50" y="65" font-family="Arial" font-size="40" font-weight="900" fill="#00ff88" text-anchor="middle">R</text></svg>`;
+    const bgEur = statusEur === "ABERTO" ? "rgba(0,255,136,0.15)" : "rgba(255,68,68,0.15)";
+    const colorEur = statusEur === "ABERTO" ? "#00ff88" : "#ff4444";
+    const logoSvg = `<svg width="60" height="60" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="none" stroke="#00ff88" stroke-width="2" stroke-dasharray="5,3"/><text x="50" y="65" font-family="Arial" font-size="40" font-weight="900" fill="#00ff88" text-anchor="middle">R</text></svg>`;
 
     res.setHeader('Content-Type', 'text/html');
     return res.status(200).send(`
       <!DOCTYPE html> <html lang="pt-BR"> <head> <meta charset="UTF-8"><title>SENTINELA v${versao}</title>
-      <style>:root{--primary:#00ff88;--bg:#050505}body{background:var(--bg);color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
-      .card{width:380px;background:rgba(17,17,17,0.9);padding:30px;border-radius:25px;border:1px solid #333;text-align:center;box-shadow: 0 10px 30px rgba(0,0,0,0.5)}
-      .badge{padding:8px 15px;border-radius:10px;font-size:11px;font-weight:bold;margin-top:15px;display:inline-block;background:rgba(0,255,136,0.1);color:var(--primary)}
-      .rev-table{width:100%;margin-top:20px;font-size:9px;color:#888;text-align:left;border-collapse:collapse}
-      .rev-table td{padding:5px;border-bottom:1px solid rgba(255,255,255,0.05)}</style></head>
-      <body><div class="card">${logoSvg}<h1>SENTINELA BOT</h1><div class="badge">V.${versao} - TRIPLA REDUNDÂNCIA TOTAL</div>
-      <div style="margin-top:20px; font-size: 14px;">EURUSD: <span style="color:${statusEur === "ABERTO" ? "#00ff88" : "#ff4444"}">${statusEur}</span> | BTCUSD: <span style="color:#00ff88">ABERTO</span></div>
-      <table class="rev-table">
-        <tr><td>77</td><td>14/02/26</td><td>Tripla Redundância Total + Lógica V.02 (EMA/Fractal/Vela)</td></tr>
-        <tr><td>76</td><td>14/02/26</td><td>Restauração Dashboard v73 + Fix EURUSD Binance</td></tr>
-      </table></div><script>setTimeout(()=>location.reload(),30000)</script></body></html>
+      <style>
+        :root { --primary: #00ff88; --bg: #050505; }
+        body { background: var(--bg); color: #fff; font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .main-card { width: 95%; max-width: 400px; background: rgba(17,17,17,0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1); border-radius: 32px; padding: 30px; box-shadow: 0 25px 50px rgba(0,0,0,0.8); text-align: center; }
+        .status-badge { display: inline-flex; align-items: center; gap: 8px; background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); padding: 8px 16px; border-radius: 12px; font-size: 11px; color: var(--primary); margin: 20px 0; }
+        .asset-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); padding: 12px 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .rev-table { width: 100%; margin-top: 25px; border-collapse: collapse; font-size: 9px; color: #888; text-align: left; }
+        .rev-table td { padding: 6px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+      </style></head>
+      <body><div class="main-card">
+        ${logoSvg}
+        <h1>SENTINELA PRO</h1>
+        <div class="status-badge">EM MONITORAMENTO...</div>
+        <div class="asset-card"><span>BTCUSD</span><span style="color:#00ff88">ABERTO</span></div>
+        <div class="asset-card"><span>EURUSD</span><span style="color:${colorEur}">${statusEur}</span></div>
+        <table class="rev-table">
+          <tr><td>78</td><td>14/02/26</td><td>Fix Regra de Ouro HTML + Alinhamento Lógica V.02</td></tr>
+          <tr><td>77</td><td>14/02/26</td><td>Tripla Redundância Total + Lógica V.02 (EMA/Fractal)</td></tr>
+        </table>
+      </div><script>setTimeout(()=>location.reload(),30000)</script></body></html>
     `);
   } catch (e) { return res.status(200).send("Aguardando Inicialização..."); }
 }
